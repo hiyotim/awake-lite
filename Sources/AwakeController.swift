@@ -46,7 +46,15 @@ final class AwakeController: ObservableObject {
                 ? "Агентов нет"
                 : "Агент запущен: " + found.joined(separator: ", ")
         }
-        setHolding(!found.isEmpty && !isPaused && misses < missesBeforeRelease)
+        // Пока пустых проверок меньше трёх, ничего не меняем: это окно
+        // перезапуска агента, и отпускать блокировку в нём нельзя.
+        if isPaused {
+            setHolding(false)
+        } else if !found.isEmpty {
+            setHolding(true)
+        } else if misses >= missesBeforeRelease {
+            setHolding(false)
+        }
     }
 
     private func setPaused(_ paused: Bool) {
