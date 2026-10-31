@@ -9,7 +9,9 @@ struct AwakeLiteApp: App {
         MenuBarExtra {
             Text(controller.statusText)
             Divider()
-            Button("Выйти") { NSApplication.shared.terminate(nil) }
+            Toggle("Пауза", isOn: controller.pauseBinding)
+            Divider()
+            Button("Выйти") { controller.quit() }
         } label: {
             Image(systemName: controller.isHolding ? "cup.and.saucer.fill" : "moon.zzz")
         }

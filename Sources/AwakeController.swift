@@ -1,5 +1,6 @@
-import Foundation
+import AppKit
 import IOKit.pwr_mgt
+import SwiftUI
 
 /// Таймер опроса, счётчик пропусков и блокировка сна.
 final class AwakeController: ObservableObject {
@@ -8,6 +9,11 @@ final class AwakeController: ObservableObject {
 
     @Published private(set) var statusText = "Агентов нет"
     @Published private(set) var isHolding = false
+    @Published private(set) var isPaused = false
+
+    var pauseBinding: Binding<Bool> {
+        Binding(get: { self.isPaused }, set: { self.setPaused($0) })
+    }
 
     private let pollInterval: TimeInterval = 5
     private let missesBeforeRelease = 3
@@ -33,10 +39,26 @@ final class AwakeController: ObservableObject {
     private func poll() {
         let found = ProcessScanner.running(Self.watched)
         misses = found.isEmpty ? misses + 1 : 0
-        statusText = found.isEmpty
-            ? "Агентов нет"
-            : "Агент запущен: " + found.joined(separator: ", ")
-        setHolding(!found.isEmpty && misses < missesBeforeRelease)
+        if isPaused {
+            statusText = "Пауза"
+        } else {
+            statusText = found.isEmpty
+                ? "Агентов нет"
+                : "Агент запущен: " + found.joined(separator: ", ")
+        }
+        setHolding(!found.isEmpty && !isPaused && misses < missesBeforeRelease)
+    }
+
+    private func setPaused(_ paused: Bool) {
+        isPaused = paused
+        poll()
+    }
+
+    func quit() {
+        timer?.invalidate()
+        timer = nil
+        if holdsAssertion { release() }
+        NSApplication.shared.terminate(nil)
     }
 
     private func setHolding(_ active: Bool) {
