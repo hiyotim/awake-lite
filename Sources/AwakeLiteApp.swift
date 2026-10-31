@@ -11,7 +11,7 @@ struct AwakeLiteApp: App {
             Divider()
             Button("Выйти") { NSApplication.shared.terminate(nil) }
         } label: {
-            Image(systemName: "moon.zzz")
+            Image(systemName: controller.isHolding ? "cup.and.saucer.fill" : "moon.zzz")
         }
         .menuBarExtraStyle(.menu)
     }
