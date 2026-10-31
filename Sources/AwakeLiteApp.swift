@@ -10,6 +10,7 @@ struct AwakeLiteApp: App {
             Text(controller.statusText)
             Divider()
             Toggle("Пауза", isOn: controller.pauseBinding)
+            Toggle("Запускать при входе", isOn: LoginItem.binding)
             Divider()
             Button("Выйти") { controller.quit() }
         } label: {
