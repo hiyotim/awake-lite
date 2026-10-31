@@ -58,6 +58,21 @@ Apple, Swift/SwiftUI, macOS 13+.
 запущены на Mac в рамках этой работы, поэтому README не выдаёт их за проверенный
 факт: массив хранит имена из ТЗ, а сканер страхует двумя формами поиска.
 
+## Сборка
+
+Нужен macOS 13+ и Command Line Tools (`xcode-select --install`). Xcode-проект не
+используется: бандл собирается скриптом через `swiftc`, чтобы не тащить
+`.xcodeproj`, который нечем проверить.
+
+```sh
+chmod +x build.sh
+./build.sh
+open AwakeLite.app
+```
+
+`build.sh` кладёт бинарник и `Resources/Info.plist` (с `LSUIElement`, поэтому
+иконки в Dock нет) в `AwakeLite.app` и подписывает бандл ad-hoc.
+
 ## Ограничения
 
 - Блокировка — `kIOPMAssertionTypePreventUserIdleSystemSleep`: она запрещает сон
