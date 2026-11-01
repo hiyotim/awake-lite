@@ -1,68 +1,64 @@
 # AwakeLite
 
-Минимальный menu-bar для macOS: пока в системе есть процесс `opencode` или `omp`,
-Mac не уходит в сон от простоя; через ~15 с после завершения последнего такого
-процесса блокировка снимается. Ноль внешних зависимостей, только публичные API
-Apple, Swift/SwiftUI, macOS 13+.
+A small native macOS menu-bar app. The existing prototype keeps the Mac awake while an opencode, omp, or codex process exists. It releases its idle-sleep assertion after three empty checks, roughly 10–15 seconds after the last matching process exits. It uses Swift, SwiftUI, public Apple APIs, and no external dependencies. Requires macOS 13 or later.
 
-Приложение отвечает ровно на один вопрос: **есть ли процесс с таким именем.**
-Оно не читает вывод агентов, логи, сокеты и не пытается отличить «работает» от
-«ждёт ввода». Запущенный, но простаивающий агент тоже держит Mac бодрым — от
-этого есть ручная «Пауза».
+The proposed event-based version is approved for implementation. The active unit is the Stage 1 core: independent work model, bounded event storage, and crash-safe recovery using synthetic events. The menu-bar app is unchanged and the core is not yet connected to it.
 
-## Шаг 0: как агенты выглядят в списке процессов
+## Project documents
 
-Проверки выполнены 2026-10-31 на VPS (Linux, Ubuntu 24.04, хост этой задачи).
-**Про macOS здесь не проверено ничего** — см. раздел «Что проверено, а что нет».
-
-| Проверка | Результат на VPS |
+| Document | Purpose |
 | --- | --- |
-| `pgrep -lx opencode` | пусто, exit 1 |
-| `pgrep -x opencode` | пусто, exit 1 |
-| `pgrep -x opencode.exe` | находит PID-ы |
-| `pgrep -f 'opencode'` | находит агентов **и** оболочку, запустившую команду |
-| `pgrep -f '(^\|/)opencode(\.exe)?( \|$)'` | находит только агентов |
-| `omp` | процесс не запущен, имя не подтверждено |
+| [SPEC.md](SPEC.md) | Proposed requirements, agreed scope, and acceptance criteria |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | Proposed module boundaries, data flow, and recovery |
+| [ROADMAP.md](ROADMAP.md) | Work order and exit criteria after approval |
+| [STATE.md](STATE.md) | Actual progress, evidence, and remaining questions |
+| [AGENTS.md](AGENTS.md) | Agent navigation, ownership map, and working instructions |
+| [HARNESS_RESEARCH.md](HARNESS_RESEARCH.md) | Dated source survey, broader than the current scope |
 
-Реальный процесс на VPS называется `opencode.exe`:
+## Current prototype behavior
+
+The prototype answers one question: does a matching process exist? It does not read agent output, logs, or sockets, and does not distinguish work from waiting for input. An open idle agent also keeps the Mac awake. Use **Pause** to release the hold manually.
+
+The interface has not been translated as part of the documentation work. UI action names in this README are English descriptions of the current controls.
+
+## Historical process-name investigation
+
+The original checks ran on 2026-10-31 on a Linux VPS running Ubuntu 24.04. This subsection establishes no macOS behavior. Later local macOS checks are listed under Verification.
+
+| Check | Result on the VPS |
+| --- | --- |
+| `pgrep -lx opencode` | Empty, exit 1 |
+| `pgrep -x opencode` | Empty, exit 1 |
+| `pgrep -x opencode.exe` | Finds PIDs |
+| `pgrep -f 'opencode'` | Finds agents and the shell running the command |
+| `pgrep -f '(^\|/)opencode(\.exe)?( \|$)'` | Finds only agents in that check |
+| omp | Not running; its process name was not confirmed |
+
+The real process on that VPS was named opencode.exe:
 
 ```
 /home/hiyori/.local/lib/node_modules/@opencode/cli/bin/opencode.exe serve --service
 /home/hiyori/.local/lib/node_modules/@opencode/cli/bin/opencode.exe run --format json ...
 ```
 
-Отсюда выводы, зашитые в сканер:
+These observations led to the current scanner:
 
-1. Жёсткий `pgrep -x <имя>` — ловушка: на VPS он не находит `opencode`, потому
-   что процесс называется `opencode.exe`. Сканер сначала пробует точное имя,
-   а если пусто — анкоренный поиск по командной строке.
-2. Анкоренный шаблон `(^|/)NAME(\.exe)?( |$)` ловит и `…/bin/opencode`, и
-   `opencode.exe`, и не ловит `vim opencode.swift`.
-3. Шаблон всё же может совпасть с чужим процессом, в командной строке которого
-   есть компонент пути с таким именем (например, `bash -c 'cd ~/opencode && …'`).
-   Это известное ограничение любого поиска по `-f`; оно задокументировано, а не
-   спрятано.
+1. Exact `pgrep -x <name>` alone misses opencode on that VPS because the process is named opencode.exe. The scanner first tries an exact name, then an anchored command-line match.
+2. The anchored `(^|/)NAME(\.exe)?( |$)` pattern accepts a path before the name and an optional .exe suffix. It rejects the checked `vim opencode.swift` case.
+3. Command-line matching can still match an unrelated process whose arguments contain a path component with that name, such as `bash -c 'cd ~/opencode && ...'`. This is a documented limitation of the current -f fallback.
 
-Итоговый массив `watched` — `["opencode", "omp"]`, голые имена:
+The watched array contains bare names: `["opencode", "omp", "codex"]`.
 
-- `opencode` — имя агента из ТЗ, а не имя файла на диске; на VPS файл называется
-  `opencode.exe`, и вариант с `.exe` добавляется шаблоном сканера, а не второй
-  записью в массиве (иначе массив пришлось бы править на каждой платформе).
-- `omp` — имя из ТЗ; на VPS процесс не запущен, поэтому ни точное имя, ни
-  командная строка не подтверждены. Если на Mac он окажется, например,
-  `omp-cli`, его нужно будет добавить в массив по факту проверки.
-- `node` / `bun` не добавлены: на VPS `opencode.exe` — самостоятельный
-  исполняемый файл, а слежка за `node` держала бы сон для любого Node-процесса.
+- opencode is the agent name from the original brief. The scanner adds the optional .exe form instead of requiring another array entry.
+- omp is also from the original brief. Neither its exact process name nor command line was confirmed on the VPS. If macOS uses a different name such as omp-cli, verify it before changing the array.
+- codex was added after a local macOS inspection on 2026-10-31 found a process at `.../CodexCLI.app/Contents/MacOS/codex`. Presence keeps the current prototype awake even without an active task. Chat activity is not inspected.
+- node and bun were not added. Watching every Node process would keep the Mac awake for unrelated programs.
 
-**Имена процессов на macOS не подтверждены.** Ни `opencode`, ни `omp` не были
-запущены на Mac в рамках этой работы, поэтому README не выдаёт их за проверенный
-факт: массив хранит имена из ТЗ, а сканер страхует двумя формами поиска.
+The opencode and omp process names on macOS were not confirmed by these prototype checks. The array retains the names from the brief, and the scanner tries two matching forms.
 
-## Сборка
+## Build the current prototype
 
-Нужен macOS 13+ и Command Line Tools (`xcode-select --install`). Xcode-проект не
-используется: бандл собирается скриптом через `swiftc`, чтобы не тащить
-`.xcodeproj`, который нечем проверить.
+Requires macOS 13 or later and Command Line Tools (`xcode-select --install`). The bundle is built directly with swiftc; there is no Xcode project.
 
 ```sh
 chmod +x build.sh
@@ -70,76 +66,71 @@ chmod +x build.sh
 open AwakeLite.app
 ```
 
-`build.sh` кладёт бинарник и `Resources/Info.plist` (с `LSUIElement`, поэтому
-иконки в Dock нет) в `AwakeLite.app` и подписывает бандл ad-hoc.
+build.sh recreates AwakeLite.app, copies Resources/Info.plist, and applies an ad-hoc signature. LSUIElement hides the Dock icon. Do not rebuild or launch the app unless the current task authorizes it.
 
-## Что проверено, а что нет
+### Core model checks
 
-Проверено 2026-10-31 на VPS (Linux, Ubuntu 24.04), не на Mac:
+The Stage 1 core (`Sources/Core/`, the `AwakeLiteCore` library, and `Tests/AwakeLiteCoreTests/`) is checked with `swift test` (XCTest, no app launch): 66 checks, 0 failures as of 2026-11-01. The core is not yet connected to the menu app or any harness.
 
-- `swiftc -parse` по всем `Sources/*.swift` (Swift 6.0) — exit 0. Это разбор
-  синтаксиса, **не** проверка типов и не сборка.
-- `ProcessScanner` (в нём только `Foundation`) собран и запущен на Linux:
-  находит реальный `opencode.exe`, хотя `pgrep -x opencode` на этой машине пуст;
-  не находит незапущенный `omp`; находит запущенный `omp.exe`; не совпадает с
-  `vim editorproc.swift`; и подтверждено ограничение из раздела «Шаг 0» —
-  совпадает с оболочкой, в командной строке которой есть путь с таким именем.
-- `Resources/Info.plist` читается как plist и содержит `LSUIElement = true`,
-  `LSMinimumSystemVersion = 13.0`.
-- `bash -n build.sh`.
-- Объём: 176 строк Swift в 4 файлах (157 непустых).
+## Verification
 
-Не проверено — и на Linux проверено быть не может:
+### Local macOS checks on 2026-10-31
 
-- сборка под macOS: `swiftc` не видел SwiftUI, IOKit и ServiceManagement,
-  поэтому ни компиляции, ни проверки типов не было;
-- `MenuBarExtra`, иконка в menu bar, `LSUIElement` в живом приложении;
-- создание и снятие IOPM assertion, записи в `pmset -g assertions`;
-- `SMAppService` (автозапуск): нужен бандл и подтверждение в настройках macOS;
-- сценарии 1–7 из ТЗ;
-- имена процессов на macOS (`opencode`, `omp`).
+After adding codex to the watched names:
 
-## Ручная приёмка на Mac (не выполнялась)
+- The bundle was compiled with swiftc using a separate temporary module cache and signed ad hoc. `codesign --verify --strict AwakeLite.app` succeeded.
+- The existing ProcessScanner detected a real codex process and did not detect a deliberately absent control name.
+- The app was not launched for those checks. Sleep assertions, menu behavior, launch at login, and battery use were not verified.
+
+Architecture and documentation translation have not changed product sources or repeated runtime verification.
+
+### Original Linux VPS checks on 2026-10-31
+
+These were reported for Ubuntu 24.04, not macOS:
+
+- `swiftc -parse` on all Sources/*.swift with Swift 6.0 exited 0. Parsing is not type checking or a build.
+- ProcessScanner, which uses only Foundation, was compiled and run on Linux. It found the real opencode.exe despite an empty `pgrep -x opencode`; did not find the absent omp; found a launched omp.exe; and rejected `vim editorproc.swift`. It also reproduced the documented false-positive case involving a shell command line containing a matching path.
+- Resources/Info.plist parsed and contained LSUIElement = true and LSMinimumSystemVersion = 13.0.
+- `bash -n build.sh` passed.
+- The prototype contained 176 Swift lines across four files, with 157 nonempty lines.
+
+The original Linux checks did not verify:
+
+- macOS compilation or type checking against SwiftUI, IOKit, and ServiceManagement.
+- Live MenuBarExtra, menu icon, or LSUIElement behavior.
+- IOPM assertion acquisition and release, or entries in `pmset -g assertions`.
+- SMAppService launch at login, which needs an app bundle and macOS settings approval.
+- The original seven acceptance scenarios below.
+- macOS process names for opencode and omp.
+
+## Original manual Mac checks, not performed
+
+These apply to the current process-based prototype, not to the proposed event-based specification's A01–A17:
 
 ```sh
 ./build.sh
 open AwakeLite.app
 ```
 
-1. Агентов нет → иконка `moon.zzz`, в `pmset -g assertions` нет записи AwakeLite.
-2. Запустить `opencode` → в течение 5 с иконка `cup.and.saucer.fill`, в
-   `pmset -g assertions` появилась запись приложения.
-3. Закрыть `opencode` → не позже ~15 с запись исчезла.
-4. Запущены `opencode` и `omp`; закрыть один → блокировка держится; закрыть
-   второй → снимается.
-5. «Пауза» при запущенном агенте → запись исчезла; снять паузу → вернулась.
-6. «Выйти» при активной блокировке → запись исчезла.
-7. Activity Monitor: в простое процесс почти не грузит CPU.
+1. With no agents, the icon is moon.zzz and pmset lists no AwakeLite assertion.
+2. Start opencode. Within five seconds, the icon becomes cup.and.saucer.fill and an assertion appears.
+3. Close opencode. The assertion disappears within roughly fifteen seconds.
+4. Run opencode and omp. Closing one preserves the assertion; closing the last releases it.
+5. Enable Pause while an agent runs. The assertion disappears. Disable Pause and it returns.
+6. Quit with a hold active. The assertion disappears.
+7. Check Activity Monitor for background CPU use.
 
-Если `pgrep -lx omp` на Mac покажет другое имя, оно добавляется в
-`AwakeController.watched`.
+If `pgrep -lx omp` on macOS reports another name, verify it before updating AwakeController.watched.
 
-## Что осталось за рамками («потом»)
+## Items excluded from the original prototype
 
-- Отличать «работает» от «ждёт ввода» — сознательно не делаем.
-- Настройка списка процессов из UI, пользовательские шаблоны и регулярки.
-- Сверка найденного PID через `ps -o comm=`, чтобы отсечь ложные срабатывания
-  на оболочках (сейчас это известное ограничение, а не незамеченный баг).
-- Уведомления, история, статистика.
-- Борьба с закрытой крышкой.
-- Developer ID, notarization, App Store: с sandbox приложение не увидит чужие
-  процессы, поэтому App Store противоречит цели.
-- CI на macOS-раннере, который собирает и запускает бандл.
-- Локализация.
+The original prototype excluded work-versus-input detection, editable process lists, custom patterns, PID verification through `ps -o comm=`, notifications, history, statistics, closed-lid control, Developer ID distribution, notarization, App Store distribution, macOS CI, and localization.
 
-## Ограничения
+Some of these, especially activity detection, now belong to the proposed next version. Follow SPEC and ROADMAP for the current plan rather than treating this historical list as a permanent exclusion.
 
-- Блокировка — `kIOPMAssertionTypePreventUserIdleSystemSleep`: она запрещает сон
-  от простоя, но не мешает гаснуть дисплею.
-- Закрытая крышка без внешнего дисплея и питания всё равно усыпит Mac — это вне
-  области задачи.
-- App Sandbox выключен: иначе приложение не увидит чужие процессы. Значит, это
-  приложение для личного использования, не для App Store.
-- Блокировка принадлежит процессу: если приложение убить `SIGKILL`-ом, ядро
-  снимет assertion вместе с процессом, «вечной» блокировки не останется — но и
-  штатного `IOPMAssertionRelease` в этом случае не будет.
+## Current limitations
+
+- kIOPMAssertionTypePreventUserIdleSystemSleep prevents idle system sleep and permits display sleep.
+- Closed-lid behavior is outside the app's scope; the prototype does not override macOS clamshell policy.
+- The prototype is not App Sandbox enabled. It was designed for personal use; store distribution was not validated.
+- The assertion belongs to the process. If SIGKILL terminates it, macOS removes its assertion, although the normal IOPMAssertionRelease path does not run.
