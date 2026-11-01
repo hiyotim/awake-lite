@@ -2,7 +2,7 @@
 
 A small native macOS menu-bar app. The existing prototype keeps the Mac awake while an opencode, omp, or codex process exists. It releases its idle-sleep assertion after three empty checks, roughly 10–15 seconds after the last matching process exits. It uses Swift, SwiftUI, public Apple APIs, and no external dependencies. Requires macOS 13 or later.
 
-The proposed event-based version is approved for implementation. The active unit is the Stage 1 core: independent work model, bounded event storage, and crash-safe recovery using synthetic events. The menu-bar app is unchanged and the core is not yet connected to it.
+The event-based version is approved for implementation. Stage 1 (independent work model, bounded event storage, crash-safe recovery) and Stage 2 (local catalog and installer: seven bundled manifests, install previews, receipts, removal, recovery, and the activation-generation handoff) exist and are fixture-verified. The menu-bar app itself is still the process-based prototype described below, and the integration code is not wired to power policy or to any harness.
 
 ## Project documents
 
@@ -66,11 +66,17 @@ chmod +x build.sh
 open AwakeLite.app
 ```
 
-build.sh recreates AwakeLite.app, copies Resources/Info.plist, and applies an ad-hoc signature. LSUIElement hides the Dock icon. Do not rebuild or launch the app unless the current task authorizes it.
+build.sh recreates AwakeLite.app, compiles `Sources/*.swift`, `Sources/Core/*.swift`, and `Sources/Integrations/*.swift`, copies `Resources/Info.plist` and `Resources/Integrations/` into `AwakeLite.app/Contents/Resources/Integrations/`, and applies an ad-hoc signature. LSUIElement hides the Dock icon. Do not rebuild or launch the app unless the current task authorizes it.
 
-### Core model checks
+### Integration catalog window (Stage 2, fixture-verified, not visually exercised)
 
-The Stage 1 core (`Sources/Core/`, the `AwakeLiteCore` library, and `Tests/AwakeLiteCoreTests/`) is checked with `swift test` (XCTest, no app launch): 66 checks, 0 failures as of 2026-11-01. The core is not yet connected to the menu app or any harness.
+The **Integrations…** menu item opens a catalog window with seven cards (Claude Code, Codex, Cursor, Antigravity, Pi, OMP, OpenCode). Each card shows per-target availability, the verification level, installation status, and required actions, with **Install support**, **Remove support**, **Check connection**, and **Show changes**; installation runs through a preview sheet that restates the exact paths and owned entries before confirmation.
+
+Installed entries are inert marker-bearing templates, not live hook wiring: no event adapters and no helper executable exist yet, every target is `unverified`, and **Check connection** therefore reports no confirmed connection. The window layout was not visually exercised; the store-level pass (every action routing to the installer API) substitutes for the manual GUI pass.
+
+### Core and integration checks
+
+`swift test` (XCTest, no app launch) covers the Stage 1 core and the Stage 2 catalog/installer: 153 checks, 0 failures as of 2026-11-01 — 66 Stage 1 (`Sources/Core/`) + 46 Catalog + 27 Installer + 10 Activation + 4 Privacy. The SwiftPM test target compiles `Sources/Core/` and `Sources/Integrations/` only; the app/UI sources (`Sources/*.swift`, including `Sources/IntegrationsView.swift`) are compiled solely by `./build.sh`, not by the test target.
 
 ## Verification
 

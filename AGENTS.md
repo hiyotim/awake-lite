@@ -2,7 +2,7 @@
 
 ## Current authorization
 
-Implementation is approved. Stage 1 "Verifiable core" is implemented and fixture-verified; the next unit is Stage 2 "Local catalog and installer" per ROADMAP.
+Implementation is approved. Stages 1 ("Verifiable core") and 2 ("Local catalog and installer", units 2.1–2.4) are implemented and fixture-verified; the next unit is Stage 3 per ROADMAP.
 
 Documentation-only restriction no longer applies within the approved scope. Do not ask again for permission already granted. Publication, commits, pushes, release uploads, and system installs still need explicit authorization for those actions. Architecture approval never implies publication authority.
 
@@ -41,13 +41,16 @@ These files exist now:
 | `Sources/LoginItem.swift` | Launch-at-login binding through SMAppService |
 | `Sources/Core/Activity.swift` | Pure reducer: identities, transitions, gaps, aggregate decision, dedup |
 | `Sources/Core/LocalEventStore.swift` | Inbox of immutable event files, atomic checkpoint, crash-safe reconcile |
+| `Sources/Integrations/` | Schema-1 manifest reader, catalog and local product discovery, declarative installer with preview, receipts, journal, rollback and recovery, and the read-only activation handoff into the model |
+| `Sources/IntegrationsView.swift` | Catalog window: AppKit-hosted on-demand window, seven cards, preview/confirmation sheets, Installer-only store |
 | `Resources/Info.plist` | App identity, minimum macOS version, menu-bar-only configuration |
-| `Package.swift` | SwiftPM library `AwakeLiteCore` plus XCTest target |
-| `Tests/AwakeLiteCoreTests/` | Synthetic-event fixtures and checks for the Stage 1 core |
-| `build.sh` | Builds with swiftc, including `Sources/Core/*.swift`, and applies an ad-hoc signature |
+| `Package.swift` | SwiftPM library `AwakeLiteCore` over `Sources/Core` and `Sources/Integrations` plus XCTest target |
+| `Tests/AwakeLiteCoreTests/` | Synthetic-event fixtures for the Stage 1 core, manifest/catalog fixtures, and isolated-root installer fixtures |
+| `Resources/Integrations/<family>/` | Bundled, trusted schema-1 manifests and inert marker-bearing templates |
+| `build.sh` | Builds with swiftc over the app, core, and integration sources, copies `Resources/Integrations/`, and applies an ad-hoc signature |
 | `AwakeLite.app/` | Ignored generated app bundle, not authoritative source |
 
-The current prototype treats process presence as activity. The menu-bar app, IOKit controller, and process scanner are unchanged; the new core is not wired to the app or to any harness yet. No adapters, installer, or helper executable exist. Do not invent test results or describe proposed files as existing.
+The menu-bar app is still the process-based prototype: it treats process presence as activity and is unchanged apart from the Integrations… menu item that opens the catalog window. The core and integration code are not wired to power policy or to any harness. Installed entries are inert marker-bearing templates; no adapters or helper executable exist, every target is unverified, and Check connection reports no confirmed connection. Do not invent test results or describe proposed files as existing.
 
 ## Planned ownership map
 
@@ -59,7 +62,7 @@ The following are proposed destinations, not files to create during documentatio
 | Activity model and reducer | `Sources/Core/Activity.swift` | Pure state transitions, work identity, uncertainty, aggregate decision |
 | Local event storage | `Sources/Core/LocalEventStore.swift` | Safe inbox, bounded retention, checkpoint, replay |
 | Hook normalization | `Sources/HookNormalizer.swift` | Parse only allowed metadata; no raw payload persistence |
-| Integration catalog and installation | `Sources/Integrations.swift` | One package list, previews, owned edits, receipts, recovery |
+| Integration catalog and installation | `Sources/Integrations/` | One package list, previews, owned edits, receipts, recovery |
 | Catalog UI | `Sources/IntegrationsView.swift` | Package cards, connection status, user actions |
 | Vendor-specific observation | A compact adapter source group; `Sources/OpenCodeAdapter.swift` for native API reads | Keep vendor contracts out of the shared reducer |
 | Power assertions | `Sources/PowerAssertion.swift`, or a small boundary in the existing controller | Exactly one assertion owner; report real IOKit results |
@@ -101,7 +104,7 @@ The installer changes only owned configuration entries. Preserve foreign setting
 
 For documentation-only changes, inspect the diff, local links, terminology, scope counts, and acceptance IDs. Do not build or launch the app to validate prose.
 
-The documented core check for the Stage 1 unit is `swift test` (XCTest), currently 66 checks. The SwiftPM test target covers `Sources/Core/` only; the `Sources/*.swift` app sources are compiled solely by `./build.sh`, not by the test target. The app build command remains `./build.sh`; it recreates the generated app bundle. Do not claim results without running them.
+The documented check for the core and integration units is `swift test` (XCTest), currently 153 checks: 66 Stage 1 core, 46 catalog/manifest/discovery, 27 installer, 10 activation handoff, and 4 privacy. The SwiftPM test target covers `Sources/Core/` and `Sources/Integrations/`; the `Sources/*.swift` app sources are excluded and compiled solely by `./build.sh`. The app build command remains `./build.sh`; it recreates the generated app bundle. Do not claim results without running them.
 
 Runtime, concurrency, and configuration changes need focused review and behavioral checks. Keep these evidence levels separate: source inspection, fixtures, compilation, real IOKit behavior, and live per-target acceptance. Record the tested product version and execution mode. Missing products remain unverified; do not download them to close a gate.
 

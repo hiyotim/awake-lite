@@ -1,6 +1,6 @@
 # AwakeLite roadmap
 
-Status: Stage 1 approved and implemented; Stages 2–6 proposed. Requirements: [SPEC.md](SPEC.md). Actual progress: [STATE.md](STATE.md).
+Status: Stages 1 and 2 implemented; Stages 3–6 proposed. Requirements: [SPEC.md](SPEC.md). Actual progress: [STATE.md](STATE.md).
 
 ## Stage 0. Approval
 
