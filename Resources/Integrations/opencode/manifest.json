@@ -1,0 +1,43 @@
+{
+  "schema": 1,
+  "family": "opencode",
+  "displayName": "OpenCode",
+  "packageVersion": "1",
+  "requiresRestart": true,
+  "requiresHookTrust": false,
+  "notes": [
+    "Local TUI target is unverified.",
+    "Connector is read-only; it never restarts the existing local service.",
+    "Session presence alone is not work; execution details need a live check."
+  ],
+  "targets": [
+    {
+      "id": "opencode.tui",
+      "mode": "cli",
+      "capabilities": ["readOnlyConnector"],
+      "verificationLevel": "unverified"
+    }
+  ],
+  "assets": [
+    {
+      "id": "connector",
+      "source": "assets/awake-lite.opencode.js",
+      "destination": "plugin/awake-lite.opencode.js"
+    }
+  ],
+  "steps": [
+    {
+      "kind": "pluginFile",
+      "target": "opencode.tui",
+      "format": "text",
+      "configRoot": "~/.config/opencode/plugin",
+      "path": "awake-lite/awake-lite.opencode.js",
+      "ownedEntries": [
+        {
+          "marker": "awake-lite/opencode.tui/connector",
+          "asset": "connector"
+        }
+      ]
+    }
+  ]
+}

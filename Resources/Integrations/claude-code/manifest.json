@@ -1,0 +1,65 @@
+{
+  "schema": 1,
+  "family": "claude-code",
+  "displayName": "Claude Code",
+  "packageVersion": "1",
+  "requiresRestart": false,
+  "requiresHookTrust": false,
+  "notes": [
+    "CLI and desktop Code tab targets are unverified.",
+    "Stop events rejected by another hook are not final; continuation needs a live check.",
+    "Desktop Code tab shares this user-level hooks file in the best-documented default; verify separately.",
+    "Installed entries sit under an app-owned `awakeLite` key as inert marker-bearing templates; vendor-accurate hook wiring is not yet installed."
+  ],
+  "targets": [
+    {
+      "id": "claude-code.cli",
+      "mode": "cli",
+      "capabilities": ["lifecycleHooks"],
+      "verificationLevel": "unverified"
+    },
+    {
+      "id": "claude-code.desktop",
+      "mode": "desktop",
+      "capabilities": ["lifecycleHooks"],
+      "verificationLevel": "unverified"
+    }
+  ],
+  "assets": [
+    {
+      "id": "hooks-cli",
+      "source": "assets/claude-hooks.json",
+      "destination": "hooks/claude-hooks.json"
+    }
+  ],
+  "steps": [
+    {
+      "kind": "hookConfig",
+      "target": "claude-code.cli",
+      "format": "json",
+      "configRoot": "~/.claude",
+      "path": "settings.json",
+      "keyPath": ["awakeLite"],
+      "ownedEntries": [
+        {
+          "marker": "awake-lite/claude-code.cli/hooks",
+          "asset": "hooks-cli"
+        }
+      ]
+    },
+    {
+      "kind": "hookConfig",
+      "target": "claude-code.desktop",
+      "format": "json",
+      "configRoot": "~/.claude",
+      "path": "settings.json",
+      "keyPath": ["awakeLite"],
+      "ownedEntries": [
+        {
+          "marker": "awake-lite/claude-code.desktop/hooks",
+          "asset": "hooks-cli"
+        }
+      ]
+    }
+  ]
+}

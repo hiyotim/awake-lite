@@ -1,0 +1,62 @@
+{
+  "schema": 1,
+  "family": "codex",
+  "displayName": "Codex",
+  "packageVersion": "1",
+  "requiresRestart": true,
+  "requiresHookTrust": true,
+  "notes": [
+    "CLI and desktop targets are unverified; desktop chats need a separate live check.",
+    "Hook config shape is the best-documented default and may differ by version.",
+    "Restart the harness after install so hooks load; local versus cloud orchestration differs."
+  ],
+  "targets": [
+    {
+      "id": "codex.cli",
+      "mode": "cli",
+      "capabilities": ["lifecycleHooks"],
+      "verificationLevel": "unverified"
+    },
+    {
+      "id": "codex.desktop",
+      "mode": "desktop",
+      "capabilities": ["lifecycleHooks"],
+      "verificationLevel": "unverified"
+    }
+  ],
+  "assets": [
+    {
+      "id": "hooks-toml",
+      "source": "assets/codex-hooks.toml",
+      "destination": "hooks/codex-hooks.toml"
+    }
+  ],
+  "steps": [
+    {
+      "kind": "hookConfig",
+      "target": "codex.cli",
+      "format": "toml",
+      "configRoot": "~/.codex",
+      "path": "config.toml",
+      "ownedEntries": [
+        {
+          "marker": "awake-lite/codex.cli/hooks",
+          "asset": "hooks-toml"
+        }
+      ]
+    },
+    {
+      "kind": "hookConfig",
+      "target": "codex.desktop",
+      "format": "toml",
+      "configRoot": "~/.codex",
+      "path": "config.toml",
+      "ownedEntries": [
+        {
+          "marker": "awake-lite/codex.desktop/hooks",
+          "asset": "hooks-toml"
+        }
+      ]
+    }
+  ]
+}

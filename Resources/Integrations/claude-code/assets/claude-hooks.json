@@ -1,0 +1,34 @@
+{
+  "UserPromptSubmit": [
+    {
+      "hooks": [
+        {
+          "type": "command",
+          "command": "{helperPath}",
+          "_awakeLite": {
+            "marker": "{marker}",
+            "family": "{family}",
+            "target": "{target}",
+            "generation": "{generation}"
+          }
+        }
+      ]
+    }
+  ],
+  "Stop": [
+    {
+      "hooks": [
+        {
+          "type": "command",
+          "command": "{helperPath}",
+          "_awakeLite": {
+            "marker": "{marker}",
+            "family": "{family}",
+            "target": "{target}",
+            "generation": "{generation}"
+          }
+        }
+      ]
+    }
+  ]
+}

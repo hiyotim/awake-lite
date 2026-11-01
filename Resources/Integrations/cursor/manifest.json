@@ -1,0 +1,45 @@
+{
+  "schema": 1,
+  "family": "cursor",
+  "displayName": "Cursor",
+  "packageVersion": "1",
+  "requiresRestart": true,
+  "requiresHookTrust": false,
+  "notes": [
+    "Desktop Agent target is unverified.",
+    "Hook file shape is the best-documented default; local and cloud hook execution differ.",
+    "Cancellation and background subagents need a separate live check.",
+    "Installed entries sit under an app-owned `awakeLite` key as inert marker-bearing templates; vendor-accurate hook wiring is not yet installed."
+  ],
+  "targets": [
+    {
+      "id": "cursor.desktop",
+      "mode": "desktop",
+      "capabilities": ["lifecycleHooks"],
+      "verificationLevel": "unverified"
+    }
+  ],
+  "assets": [
+    {
+      "id": "hooks-json",
+      "source": "assets/cursor-hooks.json",
+      "destination": "hooks/cursor-hooks.json"
+    }
+  ],
+  "steps": [
+    {
+      "kind": "hookConfig",
+      "target": "cursor.desktop",
+      "format": "json",
+      "configRoot": "~/.cursor",
+      "path": "hooks.json",
+      "keyPath": ["awakeLite"],
+      "ownedEntries": [
+        {
+          "marker": "awake-lite/cursor.desktop/hooks",
+          "asset": "hooks-json"
+        }
+      ]
+    }
+  ]
+}

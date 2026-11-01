@@ -1,0 +1,24 @@
+{
+  "beforeSubmitPrompt": [
+    {
+      "command": "{helperPath}",
+      "_awakeLite": {
+        "marker": "{marker}",
+        "family": "{family}",
+        "target": "{target}",
+        "generation": "{generation}"
+      }
+    }
+  ],
+  "stop": [
+    {
+      "command": "{helperPath}",
+      "_awakeLite": {
+        "marker": "{marker}",
+        "family": "{family}",
+        "target": "{target}",
+        "generation": "{generation}"
+      }
+    }
+  ]
+}

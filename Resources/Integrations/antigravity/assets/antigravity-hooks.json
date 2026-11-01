@@ -1,0 +1,35 @@
+{
+  "PreInvocation": [
+    {
+      "command": "{helperPath}",
+      "_awakeLite": {
+        "marker": "{marker}",
+        "family": "{family}",
+        "target": "{target}",
+        "generation": "{generation}"
+      }
+    }
+  ],
+  "PostInvocation": [
+    {
+      "command": "{helperPath}",
+      "_awakeLite": {
+        "marker": "{marker}",
+        "family": "{family}",
+        "target": "{target}",
+        "generation": "{generation}"
+      }
+    }
+  ],
+  "Stop": [
+    {
+      "command": "{helperPath}",
+      "_awakeLite": {
+        "marker": "{marker}",
+        "family": "{family}",
+        "target": "{target}",
+        "generation": "{generation}"
+      }
+    }
+  ]
+}

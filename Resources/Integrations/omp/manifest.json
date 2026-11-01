@@ -1,0 +1,43 @@
+{
+  "schema": 1,
+  "family": "omp",
+  "displayName": "OMP",
+  "packageVersion": "1",
+  "requiresRestart": true,
+  "requiresHookTrust": false,
+  "notes": [
+    "CLI target is unverified.",
+    "Auto-retry, continuation queues, and background work need a separate live check.",
+    "Extension directory is the best-documented default."
+  ],
+  "targets": [
+    {
+      "id": "omp.cli",
+      "mode": "cli",
+      "capabilities": ["inProcessExtension"],
+      "verificationLevel": "unverified"
+    }
+  ],
+  "assets": [
+    {
+      "id": "extension",
+      "source": "assets/awake-lite.omp.js",
+      "destination": "extensions/awake-lite.omp.js"
+    }
+  ],
+  "steps": [
+    {
+      "kind": "extensionFile",
+      "target": "omp.cli",
+      "format": "text",
+      "configRoot": "~/.omp/agent/extensions",
+      "path": "awake-lite/awake-lite.omp.js",
+      "ownedEntries": [
+        {
+          "marker": "awake-lite/omp.cli/extension",
+          "asset": "extension"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+# AwakeLite Codex lifecycle hooks (marker "{marker}").
+# Family "{family}", target "{target}", generation "{generation}".
+# Helper: "{helperPath}".
+# Covers UserPromptSubmit, Stop, and Interrupt.
+# Best-documented default shape; Codex hook config is unverified (see manifest notes).
+
+[[awake-lite-hooks]]
+marker = "{marker}"
+family = "{family}"
+target = "{target}"
+generation = "{generation}"
+helper = "{helperPath}"
+events = ["UserPromptSubmit", "Stop", "Interrupt"]

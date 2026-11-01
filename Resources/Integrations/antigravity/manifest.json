@@ -1,0 +1,65 @@
+{
+  "schema": 1,
+  "family": "antigravity",
+  "displayName": "Antigravity",
+  "packageVersion": "1",
+  "requiresRestart": true,
+  "requiresHookTrust": false,
+  "notes": [
+    "CLI and desktop targets are unverified; record the exact desktop product and version at acceptance.",
+    "Config path is the best-documented default.",
+    "Stop without fullyIdle is not task completion; background work needs a live check.",
+    "Installed entries sit under an app-owned `awakeLite` key as inert marker-bearing templates; vendor-accurate hook wiring is not yet installed."
+  ],
+  "targets": [
+    {
+      "id": "antigravity.cli",
+      "mode": "cli",
+      "capabilities": ["lifecycleHooks"],
+      "verificationLevel": "unverified"
+    },
+    {
+      "id": "antigravity.desktop",
+      "mode": "desktop",
+      "capabilities": ["lifecycleHooks"],
+      "verificationLevel": "unverified"
+    }
+  ],
+  "assets": [
+    {
+      "id": "hooks-json",
+      "source": "assets/antigravity-hooks.json",
+      "destination": "hooks/antigravity-hooks.json"
+    }
+  ],
+  "steps": [
+    {
+      "kind": "hookConfig",
+      "target": "antigravity.cli",
+      "format": "json",
+      "configRoot": "~/.antigravity",
+      "path": "settings.json",
+      "keyPath": ["awakeLite"],
+      "ownedEntries": [
+        {
+          "marker": "awake-lite/antigravity.cli/hooks",
+          "asset": "hooks-json"
+        }
+      ]
+    },
+    {
+      "kind": "hookConfig",
+      "target": "antigravity.desktop",
+      "format": "json",
+      "configRoot": "~/.antigravity",
+      "path": "settings.json",
+      "keyPath": ["awakeLite"],
+      "ownedEntries": [
+        {
+          "marker": "awake-lite/antigravity.desktop/hooks",
+          "asset": "hooks-json"
+        }
+      ]
+    }
+  ]
+}
