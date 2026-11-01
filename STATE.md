@@ -95,4 +95,8 @@ Remaining known limits of the hardened core:
 
 ## Next action
 
-Review this result, then Stage 2 (catalog and installer) per [ROADMAP.md](ROADMAP.md). Before Stage 3, settle stable owner identity, session-level liveness, and checkpoint recovery policy.
+The Stage 2–6 unit plans and contracts are recorded; start Stage 2 unit 2.1 (catalog model, manifest loader, fixtures) after review, per [ROADMAP.md](ROADMAP.md).
+
+ROADMAP now carries unit-level plans for Stages 2–6, and ARCHITECTURE carries the catalog and installer contracts (storage layout, manifest, receipt, and journal schemas, module boundaries, activation-generation handoff, config-root rules, and the Stage 2 isolated-root test matrix). No Stage 2 code exists yet.
+
+Before Stage 3, settle stable owner identity, session-level liveness, and checkpoint recovery policy.

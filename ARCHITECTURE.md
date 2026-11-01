@@ -126,6 +126,127 @@ Support non-default configuration roots, profiles, and XDG locations explicitly,
 
 Do not bypass Codex hook trust or workspace policy. The hook helper must not change permission decisions, continue tasks, or add model context. Its output must be inert according to the specific harness contract.
 
+## Catalog, manifests, and installer contracts
+
+Stage 2 owns one catalog, one install model, and one recovery path. The types below are design contracts for that unit; they do not exist yet. Vendor paths and vendor event names stay in adapter sources, never in these shared types.
+
+### App-owned storage layout
+
+Everything the app owns lives under one root:
+
+```
+~/Library/Application Support/AwakeLite/
+├── inbox/                       # Stage 1: immutable normalized event files
+├── rejected/                    # Stage 1: quarantined event files
+├── checkpoint.json              # Stage 1: model checkpoint envelope
+├── .lock                        # Stage 1: single-writer lock
+├── packages/<family>/           # installed resources copied from the bundle
+├── receipts/<family>.json       # one receipt per installed package
+└── journal/<operation-id>.json  # one in-flight installation operation
+```
+
+Directories are created with mode 0700 and files with 0600. `<family>` and `<operation-id>` are canonical app-owned identifiers; a raw vendor identifier is never used as a path component. `<operation-id>` is a random identifier with a monotonic component, so a journal file name cannot be predicted or reused.
+
+The package directory holds a copy of the bundled resources, so an app update cannot change installed support underneath a running harness. Removal deletes a package directory only when its receipt says the app created it.
+
+### Package manifest (bundled, trusted, schema 1)
+
+`Resources/Integrations/<family>/manifest.json` is trusted input shipped inside the app. It is declarative: it contains no shell command, no network address, and no executable code.
+
+| Field | Meaning |
+| --- | --- |
+| `schema` | Exactly `1`. Any other value is refused. |
+| `family` | Canonical family identifier, matching the containing directory. |
+| `displayName` | Card title. |
+| `packageVersion` | Version of this bundled resource set, independent of the harness version. |
+| `targets[]` | `id`, `mode` (`cli` or `desktop`), `capabilities`, `verificationLevel` (`unverified`, `fixture`, `live`). |
+| `assets[]` | `source` inside the bundle and `destination` relative to the package root. |
+| `steps[]` | Declarative configuration steps, described below. |
+| `requiresRestart` | Whether the harness must restart before events can arrive. |
+| `requiresHookTrust` | Whether the harness requires a user trust action. |
+| `notes` | Limitations shown in the preview. |
+
+Each `steps[]` entry has `kind` (`hookConfig`, `pluginFile`, `extensionFile`, `commandWrapper`), `target` (a compatibility target id from `targets[]`), `format` (`json`, `toml`, `yaml`, `text`, `directory`), `ownedEntries[]` with stable markers, and a `configRoot` selector. The loader refuses unknown `kind` or `format`, unknown targets, duplicate markers, absolute or escaping paths, and executable or network fields. A manifest therefore cannot express anything the installer is unable to undo entry by entry.
+
+`verificationLevel` is data, never inference: discovering an executable, an app bundle, or a running process leaves the level unchanged. Only a fixture or a recorded live check raises it.
+
+### Install receipt (schema 1)
+
+`receipts/<family>.json` records ownership and lifecycle only:
+
+| Field | Meaning |
+| --- | --- |
+| `schema` | Exactly `1`. |
+| `family` | Family identifier. |
+| `packageVersion` | Version that produced the installed entries. |
+| `activationGeneration` | `UInt64`, new for every install and reinstall. |
+| `installedAt` | Timestamp of the commit. |
+| `stage` | `prepared`, `applying`, `committed`, or `recoveryRequired`. |
+| `entries[]` | `target`, `path`, `format`, `marker`, `expectedHash` for each owned entry. |
+| `previousGeneration` | Optional; the generation this install replaced. |
+
+A receipt contains no prompts, responses, tool arguments, payloads, or credentials. `entries[]` is the complete removal set: an entry not listed can never be touched.
+
+### Operation journal (schema 1)
+
+`journal/<operation-id>.json` exists only while an operation is in flight or unresolved:
+
+| Field | Meaning |
+| --- | --- |
+| `schema` | Exactly `1`. |
+| `operationId` | Matches the file name. |
+| `family` | Family being changed. |
+| `action` | `install` or `remove`. |
+| `stage` | Current stage, shared with the receipt vocabulary. |
+| `startedAt` | Operation start. |
+| `steps[]` | `target`, `path`, `beforeHash`, `afterHash`, and an optional `backupPath`. |
+| `createdPaths[]` | Paths the operation created and must delete on rollback. |
+
+Recovery runs at app start and before any new operation. It replays a journal forward when the recorded work is complete and rolls back to the prepared state otherwise. Rollback refuses to overwrite a file whose current hash differs from the step's `afterHash`, so a user edit made during or after the operation is never replaced with an older copy; the operation reports a recoverable conflict instead and stays at `recoveryRequired` until a later operation resolves it.
+
+### Module and API boundaries
+
+| Module | Public surface | Boundary |
+| --- | --- | --- |
+| `Sources/Integrations.swift` | `Catalog`, `PackageManifest`, `InstallPreview`, `InstallReceipt`, `OperationJournal`, `Installer` with `preview(family:configRoot:)`, `apply(preview:)`, `remove(family:)`, `recoverPending()` | Owns catalog loading, validation, config edits, receipts, and recovery. Never parses vendor payloads and never holds power policy. |
+| `Sources/IntegrationsView.swift` | Catalog cards, preview sheet, install/remove/check actions, status and required-action text | Presents installer state and sends user intent. No file edits and no generated configuration. |
+| `Sources/HookNormalizer.swift` | Allowlist parsing of a hook payload into `ActivityEvent` | Drops unknown fields; never persists a raw payload. |
+| `Helper/main.swift` | Short-lived ingestion executable invoked by hooks | Writes one immutable event file per invocation and exits. Never holds power policy, never stays resident, never reads the checkpoint. |
+| Adapter sources per family | Vendor paths, event names, snapshot semantics | Keep vendor contracts out of the shared core. |
+
+`Catalog` resolves target availability without treating presence as verification. `InstallPreview` carries the family, generation it would create, config root, resolved target list, exact paths, owned entries, conflicts found, and the warnings that the confirmation sheet must display. `apply(preview:)` refuses a preview whose inputs changed since it was produced, so a stale confirmation cannot overwrite an intervening edit.
+
+### Activation-generation handoff
+
+`ActivityModel.activate(family:generation:)` is called at app startup from committed receipts, and `deactivate(family:)` from removal. Each install and reinstall issues a new generation recorded in the receipt and in the installed command, plugin, or extension; the installed artifact carries the generation it was installed with, and an event carrying any other generation is rejected by the existing core. A late event from a hook that was running during removal therefore cannot restore its contribution, including after a later reinstall.
+
+The model is not wired to power policy in Stage 2. Activation exists so the generation rule can be proven before any assertion is acquired.
+
+### Config-root rules
+
+- The default root is the user-level location; a step may name an explicit override for a profile, XDG path, or project-scoped configuration.
+- A step never guesses among several candidate roots. If the intended root is not explicitly identified, the installer reports the limitation instead of writing to an unused default profile and implying success.
+- Every path the installer writes lies inside the previewed root or the app support root. Anything else fails validation.
+- Read current content, structurally add or remove only owned entries, and preserve foreign settings, hooks, plugins, credentials, and formatting intent.
+- Unsupported formats, symlink targets, and conflicting existing entries fail with an explanation rather than replacing a file.
+
+### Stage 2 test matrix
+
+All checks run against a temporary home and configuration root; no real user settings are read or written.
+
+1. Fresh install for each of the seven families.
+2. Repeated install is idempotent and creates no duplicate entry.
+3. Install beside foreign hooks and plugins preserves them.
+4. Unsupported format or a conflicting entry fails without replacing the file.
+5. A symlink target is refused.
+6. A stale preview is refused.
+7. Interruption after each journal step; recovery reaches committed or prepared on the next start.
+8. Rollback over a user-edited file is refused and reported as recoverable.
+9. Removal preserves foreign entries.
+10. Removal or reinstall rejects old-generation events.
+11. Receipts and journals contain no conversation data (A15).
+12. No observer runs for an inactive package (A01).
+
 ## Checks before adapter implementation
 
 First prove the core with fixtures for two parallel sessions, late completion, a waiting parent with a working child, an event gap, PID reuse, and restart.
