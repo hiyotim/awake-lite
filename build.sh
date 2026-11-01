@@ -11,7 +11,7 @@ mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 
 swiftc -O -parse-as-library \
     -target "$(uname -m)-apple-macos13.0" \
-    Sources/*.swift \
+    Sources/*.swift Sources/Core/*.swift \
     -o "$app/Contents/MacOS/AwakeLite"
 
 cp Resources/Info.plist "$app/Contents/Info.plist"
