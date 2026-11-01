@@ -5,7 +5,7 @@ import SwiftUI
 /// Таймер опроса, счётчик пропусков и блокировка сна.
 final class AwakeController: ObservableObject {
     /// Имя агента, без суффикса `.exe`: вариант с ним добавляет шаблон сканера.
-    static let watched = ["opencode", "omp"]
+    static let watched = ["opencode", "omp", "codex"]
 
     @Published private(set) var statusText = "Агентов нет"
     @Published private(set) var isHolding = false
