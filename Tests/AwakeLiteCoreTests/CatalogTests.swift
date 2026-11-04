@@ -4,6 +4,27 @@ import XCTest
 
 /// Unit 2.1: manifest schema 1, loader, catalog, discovery.
 final class CatalogTests: XCTestCase {
+    /// The single source of truth for shipped verification levels.
+    ///
+    /// A level is declared data (ARCHITECTURE, "Package manifest"): it is raised
+    /// only by an adapter fixture or a recorded live check, never by discovery
+    /// and never by the presence of an installed product. Four targets have
+    /// adapter fixtures after Stage 3 (units 3.2–3.4); the remaining six,
+    /// including both desktop-only and not-yet-adapter families, stay
+    /// `unverified` because no fixture or live check exists for them.
+    static let expectedVerificationLevels: [String: VerificationLevel] = [
+        "antigravity.cli": .unverified,
+        "antigravity.desktop": .unverified,
+        "claude-code.cli": .unverified,
+        "claude-code.desktop": .unverified,
+        "codex.cli": .fixture,
+        "codex.desktop": .unverified,
+        "cursor.desktop": .unverified,
+        "omp.cli": .fixture,
+        "opencode.tui": .fixture,
+        "pi.cli": .fixture
+    ]
+
     // MARK: - Bundled catalog
 
     func testBundledCatalogDecodesAllSevenFamilies() throws {
@@ -22,7 +43,11 @@ final class CatalogTests: XCTestCase {
             XCTAssertFalse(manifest.assets.isEmpty)
             for target in manifest.targets {
                 XCTAssertTrue(target.id.hasPrefix("\(family)."), "target \(target.id) has the wrong prefix")
-                XCTAssertEqual(target.verificationLevel, .unverified, "bundled targets ship unverified")
+                let expected = try XCTUnwrap(
+                    Self.expectedVerificationLevels[target.id],
+                    "target \(target.id) has no recorded level"
+                )
+                XCTAssertEqual(target.verificationLevel, expected, "target \(target.id) must declare its recorded level")
             }
             for step in manifest.steps {
                 XCTAssertNotNil(manifest.target(withID: step.target))
@@ -53,6 +78,22 @@ final class CatalogTests: XCTestCase {
         XCTAssertEqual(modes["opencode.tui"], .cli)
     }
 
+    /// The declared matrix is data, so the whole table is asserted at once: a
+    /// level that moves without an accompanying fixture or live check, and a
+    /// new target that appears without a recorded level, both fail here.
+    func testBundledTargetsDeclareTheRecordedVerificationLevels() throws {
+        let catalog = try IntegrationFixtures.bundledCatalog()
+        let declared = Dictionary(
+            uniqueKeysWithValues: catalog.compatibilityTargets.map { ($0.id, $0.verificationLevel) }
+        )
+
+        XCTAssertEqual(Set(declared.keys), Set(Self.expectedVerificationLevels.keys))
+        XCTAssertEqual(declared, Self.expectedVerificationLevels)
+        XCTAssertEqual(declared.values.filter { $0 == .fixture }.count, 4, "pi, omp, opencode, and codex.cli have fixtures")
+        XCTAssertFalse(declared.values.contains(.live), "no target has a recorded live acceptance yet")
+        XCTAssertEqual(declared["codex.desktop"], .unverified, "desktop delivery is unproven")
+    }
+
     func testCatalogExposesRestartAndTrustFlags() throws {
         let catalog = try IntegrationFixtures.bundledCatalog()
         XCTAssertTrue(try catalog.manifest(for: "codex").requiresRestart)
@@ -63,6 +104,10 @@ final class CatalogTests: XCTestCase {
 
     // MARK: - Discovery
 
+    /// Discovery reads files only. The family used here has one `fixture` target
+    /// and one `unverified` target, so the check compares discovered status
+    /// against the manifest value instead of a blanket expectation: appearing on
+    /// disk neither raises nor lowers a declared level.
     func testDiscoveryReportsAvailabilityWithoutRaisingVerification() throws {
         let sandbox = try IntegrationFixtures.makeSandbox()
         defer { try? FileManager.default.removeItem(at: sandbox) }
@@ -73,11 +118,16 @@ final class CatalogTests: XCTestCase {
 
         let catalog = try IntegrationFixtures.bundledCatalog()
         let discovery = ProductDiscovery(homeRoot: home, applicationRoots: [applications])
+        let declared = Dictionary(
+            uniqueKeysWithValues: try catalog.manifest(for: "codex").targets.map { ($0.id, $0.verificationLevel) }
+        )
+        XCTAssertEqual(declared["codex.cli"], .fixture)
+        XCTAssertEqual(declared["codex.desktop"], .unverified)
 
-        let before = try catalog.targetStatuses(for: "claude-code", discovery: discovery)
+        let before = try catalog.targetStatuses(for: "codex", discovery: discovery)
         XCTAssertEqual(before.count, 2)
         XCTAssertTrue(before.allSatisfy { !$0.isAvailable })
-        XCTAssertTrue(before.allSatisfy { $0.verificationLevel == .unverified })
+        XCTAssertTrue(before.allSatisfy { $0.verificationLevel == declared[$0.id] })
         XCTAssertTrue(
             before.flatMap(\.searchedPaths).allSatisfy {
                 $0.hasPrefix(home.path) || $0.hasPrefix(applications.path)
@@ -86,21 +136,24 @@ final class CatalogTests: XCTestCase {
         )
 
         // A CLI binary and a desktop application bundle appear.
-        let binary = home.appendingPathComponent(".local/bin/claude")
+        let binary = home.appendingPathComponent(".local/bin/codex")
         try IntegrationFixtures.write("#!/bin/sh\n", to: binary)
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: binary.path)
-        let appInfo = applications.appendingPathComponent("Claude.app/Contents/Info.plist")
+        let appInfo = applications.appendingPathComponent("Codex.app/Contents/Info.plist")
         try IntegrationFixtures.write("<plist/>", to: appInfo)
 
-        let after = try catalog.targetStatuses(for: "claude-code", discovery: discovery)
-        let cli = try XCTUnwrap(after.first { $0.id == "claude-code.cli" })
-        let desktop = try XCTUnwrap(after.first { $0.id == "claude-code.desktop" })
+        let after = try catalog.targetStatuses(for: "codex", discovery: discovery)
+        let cli = try XCTUnwrap(after.first { $0.id == "codex.cli" })
+        let desktop = try XCTUnwrap(after.first { $0.id == "codex.desktop" })
         XCTAssertTrue(cli.isAvailable)
         XCTAssertTrue(cli.presentPaths.contains(binary.path))
         XCTAssertTrue(desktop.isAvailable)
-        XCTAssertTrue(desktop.presentPaths.contains(applications.appendingPathComponent("Claude.app").path))
-        // Discovery never raises a verification level.
-        XCTAssertEqual(cli.verificationLevel, .unverified)
+        XCTAssertTrue(desktop.presentPaths.contains(applications.appendingPathComponent("Codex.app").path))
+        // Discovery never raises a verification level: each status still reports
+        // exactly what the manifest declares.
+        XCTAssertEqual(cli.verificationLevel, declared["codex.cli"])
+        XCTAssertEqual(desktop.verificationLevel, declared["codex.desktop"])
+        XCTAssertEqual(cli.verificationLevel, .fixture)
         XCTAssertEqual(desktop.verificationLevel, .unverified)
     }
 
@@ -126,7 +179,10 @@ final class CatalogTests: XCTestCase {
         let discovery = ProductDiscovery(homeRoot: home, applicationRoots: [applications])
         let statuses = try catalog.targetStatuses(for: "codex", discovery: discovery)
         XCTAssertTrue(statuses.allSatisfy { !$0.isAvailable })
-        XCTAssertTrue(statuses.allSatisfy { $0.verificationLevel == .unverified })
+        // An unusable candidate is absence; it never edits the declared level.
+        for status in statuses {
+            XCTAssertEqual(status.verificationLevel, Self.expectedVerificationLevels[status.id])
+        }
     }
 
     func testDiscoveryHasDocumentedCandidatesForEveryTarget() throws {

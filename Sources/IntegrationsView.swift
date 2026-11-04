@@ -89,6 +89,9 @@ final class IntegrationsStore: ObservableObject {
 
     private var catalog: Catalog?
     private var installer: Installer?
+    /// Why this bundle cannot name a helper for new installed hooks. Existing
+    /// support stays removable, so this refuses installs only.
+    private var helperPathError: String?
     private var discovery: ProductDiscovery
     private var manifests: [PackageManifest] = []
     private var targetStatuses: [String: [TargetStatus]] = [:]
@@ -132,7 +135,17 @@ final class IntegrationsStore: ObservableObject {
         do {
             let catalog = try Catalog(loading: root)
             self.catalog = catalog
-            self.installer = Installer(catalog: catalog)
+            // Installed hooks must invoke the helper of *this* bundle. A
+            // missing helper is a refusal for new installs, not a reason to
+            // break the catalog: removal and review still work.
+            do {
+                let resolved = try HelperResolver.resolve(appBundle: Bundle.main.bundleURL)
+                helperPathError = nil
+                self.installer = Installer(catalog: catalog, helperPath: resolved)
+            } catch {
+                helperPathError = Self.describe(error)
+                self.installer = Installer(catalog: catalog)
+            }
             self.manifests = catalog.allManifests
             var statuses: [String: [TargetStatus]] = [:]
             for manifest in manifests {
@@ -219,6 +232,14 @@ final class IntegrationsStore: ObservableObject {
             rebuildCards()
             return
         }
+        if let helperPathError {
+            errors[family] = """
+            Установка отменена: помощник AwakeLite недоступен в этом бандле \
+            (\(helperPathError)). Запись, которая не сможет запуститься, не создаётся.
+            """
+            rebuildCards()
+            return
+        }
         do {
             let preview = try installer.preview(
                 family: family,
@@ -246,6 +267,14 @@ final class IntegrationsStore: ObservableObject {
         messages[family] = nil
         guard let installer else {
             errors[family] = "Каталог интеграций не загружен."
+            rebuildCards()
+            return
+        }
+        if let helperPathError {
+            errors[family] = """
+            Установка отменена: помощник AwakeLite недоступен в этом бандле \
+            (\(helperPathError)). Запись, которая не сможет запуститься, не создаётся.
+            """
             rebuildCards()
             return
         }
@@ -311,7 +340,9 @@ final class IntegrationsStore: ObservableObject {
         Task { self.performRemoval(family) }
     }
 
-    /// Честный отчёт: адаптеров этапа 3 ещё нет, поэтому событий нет.
+    /// Честный отчёт: адаптеры этапа 3 и помощник поставлены, и установленная связка может
+    /// писать события, но приложение не подписано на inbox и не управляет моделью, поэтому
+    /// наблюдаемого состояния работы нет и подключение подтвердить нельзя.
     func checkConnection(family: String) {
         guard !busyFamilies.contains(family) else { return }
         errors[family] = nil
@@ -329,8 +360,8 @@ final class IntegrationsStore: ObservableObject {
         } else if let receipt = receipts[family] {
             messages[family] = """
             Поддержка установлена на поколении активации \(receipt.activationGeneration). \
-            Источника событий пока нет: адаптеры появятся на этапе 3, поэтому ни одно состояние работы \
-            наблюдать нельзя. Подключение не подтверждено.
+            Адаптеры этапа 3 поставлены, но приложение ещё не подписано на события и не связано с моделью, \
+            поэтому наблюдение работы не подтверждено. Подключение не подтверждено.
             """
         } else if let receiptError = receiptErrors[family] {
             messages[family] = "Квитанция установки не читается, состояние работы неизвестно: \(receiptError)"
@@ -359,7 +390,8 @@ final class IntegrationsStore: ObservableObject {
             messages[family] = """
             Установлено. Поколение активации \(receipt.activationGeneration); \
             записей под контролем AwakeLite: \(receipt.entries.count). \
-            Это инертные шаблоны: к продукту они ещё не подключены.
+            Для Pi, OMP и Codex установленные записи вызывают помощника AwakeLite; \
+            для Codex требуется подтвердить доверие к хукам в /hooks.
             """
         } catch {
             errors[family] = Self.describe(error)
@@ -760,7 +792,11 @@ private struct InstallPreviewSheet: View {
                     section("Конфликты", preview.conflicts, emptyText: "Нет.")
                     section("Предупреждения", preview.warnings, emptyText: "Нет.")
                     section("Примечания пакета", preview.notes, emptyText: "Нет.")
-                    section("Путь помощника", [preview.helperPath], emptyText: nil)
+                    section(
+                        "Помощник, записываемый в установленные записи",
+                        [preview.helperPath],
+                        emptyText: nil
+                    )
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }

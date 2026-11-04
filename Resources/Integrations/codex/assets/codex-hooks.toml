@@ -1,13 +1,74 @@
-# AwakeLite Codex lifecycle hooks (marker "{marker}").
+# AwakeLite lifecycle hooks for Codex (marker "{marker}").
 # Family "{family}", target "{target}", generation "{generation}".
-# Helper: "{helperPath}".
-# Covers UserPromptSubmit, Stop, and Interrupt.
-# Best-documented default shape; Codex hook config is unverified (see manifest notes).
+# Helper "{helperPath}".
+#
+# Source: https://learn.chatgpt.com/docs/hooks (fetched 2026-11-01).
+#
+# Codex runs every command hook without waiting when "async" is true, so these
+# handlers can never delay the turn, block a tool, answer a permission prompt,
+# continue a turn, or add model context. Codex interprets hook exit codes and
+# stdout per event; the helper writes nothing to stdout and always exits after
+# writing at most one local lifecycle event, and the background contract makes
+# its exit status inert either way.
+#
+# Codex skips untrusted non-managed hooks. After installing, open "/hooks" in
+# Codex once, review the seven AwakeLite entries, and trust them. Editing this
+# block later changes each handler hash and requires a new review.
+#
+# Session-end hooks are deliberately absent. Such an event reports that one
+# conversation ended, not that the owner process died, and no hook path proves
+# owner death; the app-side owner probe is the only verified source. A Codex
+# session that ends without a final Stop or Interrupt therefore keeps its
+# turn's hold rather than releasing it, which is conservative and never claims
+# idle.
 
-[[awake-lite-hooks]]
-marker = "{marker}"
-family = "{family}"
-target = "{target}"
-generation = "{generation}"
-helper = "{helperPath}"
-events = ["UserPromptSubmit", "Stop", "Interrupt"]
+[[hooks.UserPromptSubmit]]
+[[hooks.UserPromptSubmit.hooks]]
+type = "command"
+command = "\"{helperPath}\" --family codex --target {target} --generation {generation} --event UserPromptSubmit"
+async = true
+timeout = 10
+
+[[hooks.PermissionRequest]]
+[[hooks.PermissionRequest.hooks]]
+type = "command"
+command = "\"{helperPath}\" --family codex --target {target} --generation {generation} --event PermissionRequest"
+async = true
+timeout = 10
+
+[[hooks.PostToolUse]]
+[[hooks.PostToolUse.hooks]]
+type = "command"
+command = "\"{helperPath}\" --family codex --target {target} --generation {generation} --event PostToolUse"
+async = true
+timeout = 10
+
+[[hooks.Stop]]
+[[hooks.Stop.hooks]]
+type = "command"
+command = "\"{helperPath}\" --family codex --target {target} --generation {generation} --event Stop"
+async = true
+timeout = 10
+
+# Codex runs Interrupt hooks even in the background with a one-to-three second
+# timeout and a one-second default.
+[[hooks.Interrupt]]
+[[hooks.Interrupt.hooks]]
+type = "command"
+command = "\"{helperPath}\" --family codex --target {target} --generation {generation} --event Interrupt"
+async = true
+timeout = 3
+
+[[hooks.SubagentStart]]
+[[hooks.SubagentStart.hooks]]
+type = "command"
+command = "\"{helperPath}\" --family codex --target {target} --generation {generation} --event SubagentStart"
+async = true
+timeout = 10
+
+[[hooks.SubagentStop]]
+[[hooks.SubagentStop.hooks]]
+type = "command"
+command = "\"{helperPath}\" --family codex --target {target} --generation {generation} --event SubagentStop"
+async = true
+timeout = 10

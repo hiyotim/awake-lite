@@ -409,9 +409,10 @@ final class LocalEventStoreTests: XCTestCase {
         XCTAssertEqual(try store.loadModel().works.count, 2)
     }
 
-    /// Sixteen identical producers race for the same file name; none of them
-    /// may overwrite another, and deduplication still collapses the replay.
-    func testConcurrentIdenticalEnqueuesDoNotLoseFiles() throws {
+    /// Sixteen identical producers race for the same file name. The event is
+    /// the same fact, so exactly one file is stored and every producer
+    /// succeeds; the model still applies it once.
+    func testConcurrentIdenticalEnqueuesCoalesceIntoOneFact() throws {
         let sample = event("same-id", work: "same", at: epoch)
         let failures = FailureBox()
 
@@ -424,16 +425,59 @@ final class LocalEventStoreTests: XCTestCase {
         }
 
         XCTAssertTrue(failures.values.isEmpty, "enqueue failures: \(failures.values)")
-        XCTAssertEqual(try inboxNames().count, 16)
+        XCTAssertEqual(try inboxNames().count, 1, "an identical replay must not add a second file")
 
         var model = activatedModel()
         let report = try store.reconcile(&model)
 
         XCTAssertEqual(report.applied, 1)
-        XCTAssertEqual(report.duplicates, 15)
-        XCTAssertEqual(report.processedFiles, 16)
+        XCTAssertEqual(report.duplicates, 0)
+        XCTAssertEqual(report.processedFiles, 1)
         XCTAssertEqual(model.works.count, 1)
         XCTAssertEqual(try inboxNames(), [])
+    }
+
+    /// The same event arriving twice is one fact: the second write is accepted
+    /// without adding a file, so a producer that retries is not an error.
+    func testIdenticalReplayUnderOneNameIsAcceptedWithoutANewFile() throws {
+        let sample = event("replay", work: "w", at: epoch)
+
+        try store.enqueue(sample)
+        XCTAssertNoThrow(try store.enqueue(sample))
+
+        XCTAssertEqual(try inboxNames(), [EventFileName.make(event: sample, at: sample.timestamp)])
+
+        var model = activatedModel()
+        let report = try store.reconcile(&model)
+        XCTAssertEqual(report.applied, 1)
+        XCTAssertEqual(report.duplicates, 0)
+        XCTAssertEqual(model.works.count, 1)
+    }
+
+    /// Two different payloads under one name would merge two facts, so the
+    /// second write is refused with a detail and the first stays intact.
+    func testDifferentContentUnderOneEventNameIsRefused() throws {
+        let first = event("reused", work: "one", at: epoch)
+        let second = event("reused", work: "two", at: epoch)
+
+        try store.enqueue(first)
+        XCTAssertThrowsError(try store.enqueue(second)) { error in
+            guard case .writeFailed(let detail)? = error as? StoreError else {
+                return XCTFail("expected a content conflict, got \(error)")
+            }
+            XCTAssertEqual(
+                detail,
+                "an event with the same identifier already exists with different content"
+            )
+        }
+
+        XCTAssertEqual(try inboxNames(), [EventFileName.make(event: first, at: first.timestamp)])
+
+        var model = activatedModel()
+        let report = try store.reconcile(&model)
+        XCTAssertEqual(report.applied, 1)
+        XCTAssertEqual(model.works.count, 1)
+        XCTAssertEqual(model.works.first?.key.work, "one", "the stored fact must stay the first one")
     }
 
     // MARK: - Checkpoint
@@ -676,21 +720,39 @@ final class LocalEventStoreTests: XCTestCase {
         XCTAssertEqual(try inboxNames(), [])
     }
 
-    func testIdentifiersDifferingOnlyByCaseWriteTwoFiles() throws {
+    /// Two identifiers that differ only by case must never be folded into one
+    /// stored fact. On a case-insensitive volume the second write is refused as
+    /// a content conflict; on a case-sensitive volume it is a separate file.
+    func testIdentifiersDifferingOnlyByCaseAreNeverConflated() throws {
         let upper = event("Same", work: "one", at: epoch)
         let lower = event("same", work: "two", at: epoch)
+        try store.prepare()
+
+        let probe = root.appendingPathComponent("CaseProbe")
+        try Data().write(to: probe)
+        let foldsCase = FileManager.default.fileExists(
+            atPath: root.appendingPathComponent("caseprobe").path
+        )
+        try FileManager.default.removeItem(at: probe)
 
         try store.enqueue(upper)
-        try store.enqueue(lower)
-
-        let names = try inboxNames()
-        XCTAssertEqual(names.count, 2, "a case-insensitive volume must not fold two IDs into one file")
-        XCTAssertNotEqual(names[0], names[1])
-
         var model = activatedModel()
-        let report = try store.reconcile(&model)
-        XCTAssertEqual(report.applied, 2)
-        XCTAssertEqual(model.works.count, 2)
+
+        if foldsCase {
+            XCTAssertThrowsError(try store.enqueue(lower)) { error in
+                guard case .writeFailed? = error as? StoreError else {
+                    return XCTFail("expected a content conflict, got \(error)")
+                }
+            }
+            XCTAssertEqual(try inboxNames().count, 1)
+            XCTAssertEqual(try store.reconcile(&model).applied, 1)
+            XCTAssertEqual(model.works.first?.key.work, "one")
+        } else {
+            try store.enqueue(lower)
+            XCTAssertEqual(try inboxNames().count, 2)
+            XCTAssertEqual(try store.reconcile(&model).applied, 2)
+            XCTAssertEqual(model.works.count, 2)
+        }
         XCTAssertEqual(try inboxNames(), [])
     }
 

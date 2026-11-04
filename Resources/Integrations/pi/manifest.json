@@ -6,23 +6,24 @@
   "requiresRestart": true,
   "requiresHookTrust": false,
   "notes": [
-    "CLI target is unverified.",
-    "Reload, session switch, and cancellation need a separate live check.",
-    "Extension directory is the best-documented default."
+    "CLI target is fixture-level, not live: no live Pi run was performed. Adapter fixtures cover the documented extension event shapes.",
+    "Extension source follows the documented default factory, event names, and ~/.pi/agent/extensions/<name>/index.js discovery.",
+    "Reload and session switch are mapped from documented session_shutdown and session_start reasons; delivery order is unverified.",
+    "Pi documents no subagent lifecycle event, so child work is not reported."
   ],
   "targets": [
     {
       "id": "pi.cli",
       "mode": "cli",
       "capabilities": ["inProcessExtension"],
-      "verificationLevel": "unverified"
+      "verificationLevel": "fixture"
     }
   ],
   "assets": [
     {
       "id": "extension",
       "source": "assets/awake-lite.pi.js",
-      "destination": "extensions/awake-lite.pi.js"
+      "destination": "extensions/awake-lite/index.js"
     }
   ],
   "steps": [
@@ -31,7 +32,7 @@
       "target": "pi.cli",
       "format": "text",
       "configRoot": "~/.pi/agent/extensions",
-      "path": "awake-lite/awake-lite.pi.js",
+      "path": "awake-lite/index.js",
       "ownedEntries": [
         {
           "marker": "awake-lite/pi.cli/extension",

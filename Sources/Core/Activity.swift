@@ -700,9 +700,18 @@ struct ActivityModel: Codable {
 
     /// Verified owner termination retires exactly that owner's work. Work
     /// owned by any other process stays accounted for.
+    ///
+    /// Only records no newer than the event are ended: a termination report
+    /// that arrives after work was observed again cannot retire it, and a late
+    /// report never moves `updatedAt` backwards. This keeps a detached or
+    /// reordered teardown event from ending a run that has since restarted.
     private mutating func applyOwnerTerminated(_ event: ActivityEvent) -> ApplyOutcome {
         let affected = works
-            .filter { $0.value.state.isActive && $0.value.owner == event.owner }
+            .filter {
+                $0.value.state.isActive
+                    && $0.value.owner == event.owner
+                    && $0.value.updatedAt <= event.timestamp
+            }
             .map(\.key)
         for identity in affected {
             works[identity]?.state = .ended

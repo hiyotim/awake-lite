@@ -1,117 +1,75 @@
 # Agent guide for AwakeLite
 
-## Current authorization
+## Current task and scope
 
-Implementation is approved. Stages 1 ("Verifiable core") and 2 ("Local catalog and installer", units 2.1–2.4) are implemented and fixture-verified; the next unit is Stage 3 per ROADMAP.
+The user selected OMP CLI (`omp.cli`) for the first working version on 2026-11-02. Follow the recovery units R0–R4 in [ROADMAP.md](ROADMAP.md). The former Stage 4 expansion is deferred. Existing adapters and bundled packages do not expand the active scope.
 
-Documentation-only restriction no longer applies within the approved scope. Do not ask again for permission already granted. Publication, commits, pushes, release uploads, and system installs still need explicit authorization for those actions. Architecture approval never implies publication authority.
+The current assignment is documentation cleanup and a development plan. Do not treat this assignment as a request to implement or launch the app. Implementation was previously approved; when asked to continue development, start with R1 without repeating that approval request. Commits, pushes, publication, release uploads, and system installs require explicit authorization for those actions.
 
-## Start here
+## Read in this order
 
-1. Read the current user request. It takes precedence over historical plans and this file.
-2. Run `git status --short`. Preserve existing changes and distinguish them from your work.
-3. Read [STATE.md](STATE.md) for actual progress, authorization, and unresolved checks.
-4. Read the relevant requirements in [SPEC.md](SPEC.md), then the owning section in [ARCHITECTURE.md](ARCHITECTURE.md).
-5. For approved implementation, select the next incomplete unit from [ROADMAP.md](ROADMAP.md). Do not restart completed research.
+1. Read the current user request and run `git status --short`. Preserve existing work, including untracked files.
+2. Read [STATE.md](STATE.md) for the actual code state and evidence.
+3. Read [SPEC.md](SPEC.md) for first-version behavior and acceptance criteria.
+4. Select the next incomplete recovery unit in [ROADMAP.md](ROADMAP.md).
+5. Read only the owning contracts in [ARCHITECTURE.md](ARCHITECTURE.md) and the relevant source files.
 
-Read proportionally. Open source research only when a vendor contract, version, path, or missing evidence affects the task.
+README is the entry point. SPEC owns requirements. ARCHITECTURE owns contracts. ROADMAP owns work order. STATE owns progress and evidence. [HARNESS_RESEARCH.md](HARNESS_RESEARCH.md) is a dated source survey, not live acceptance or a task list.
 
-## Documentation map
+## Actual implementation
 
-| File | Use it for |
-| --- | --- |
-| [README.md](README.md) | Project entry point, current prototype, existing build, historical checks |
-| [STATE.md](STATE.md) | Actual implementation and verification status; next authorized action |
-| [SPEC.md](SPEC.md) | Agreed seven packages, ten targets, product behavior, acceptance IDs A01–A17 |
-| [ARCHITECTURE.md](ARCHITECTURE.md) | Module ownership, data model, event order, storage, installation contracts |
-| [ROADMAP.md](ROADMAP.md) | Implementation sequence and exit criteria after approval |
-| [HARNESS_RESEARCH.md](HARNESS_RESEARCH.md) | Dated source survey; broader than current scope and not runtime evidence |
-| `AGENTS.md` | Working instructions and navigation; do not duplicate the full specification here |
+The current source is an incomplete migration. `Sources/ProcessScanner.swift` is deleted in the worktree. `AwakeController` starts with an idle aggregate decision; no app caller supplies new decisions. `Sources/PowerAssertion.swift` exists, but agent events do not reach its policy through the app. Do not describe this checkout as a working keep-awake utility.
 
-The specification owns requirements. The architecture owns design decisions. STATE records what exists. Research may contain earlier alternatives or additional products; it does not expand the agreed scope. If these sources conflict materially, resolve the conflict before implementing the affected behavior.
-
-## Existing repository
-
-These files exist now:
-| Path | Current responsibility |
-| --- | --- |
-| `Sources/AwakeLiteApp.swift` | SwiftUI entry point and MenuBarExtra |
-| `Sources/AwakeController.swift` | Five-second process polling, pause, current IOKit assertion lifecycle, quit |
-| `Sources/ProcessScanner.swift` | Exact-name and command-line pgrep matching |
-| `Sources/LoginItem.swift` | Launch-at-login binding through SMAppService |
-| `Sources/Core/Activity.swift` | Pure reducer: identities, transitions, gaps, aggregate decision, dedup |
-| `Sources/Core/LocalEventStore.swift` | Inbox of immutable event files, atomic checkpoint, crash-safe reconcile |
-| `Sources/Integrations/` | Schema-1 manifest reader, catalog and local product discovery, declarative installer with preview, receipts, journal, rollback and recovery, and the read-only activation handoff into the model |
-| `Sources/IntegrationsView.swift` | Catalog window: AppKit-hosted on-demand window, seven cards, preview/confirmation sheets, Installer-only store |
-| `Resources/Info.plist` | App identity, minimum macOS version, menu-bar-only configuration |
-| `Package.swift` | SwiftPM library `AwakeLiteCore` over `Sources/Core` and `Sources/Integrations` plus XCTest target |
-| `Tests/AwakeLiteCoreTests/` | Synthetic-event fixtures for the Stage 1 core, manifest/catalog fixtures, and isolated-root installer fixtures |
-| `Resources/Integrations/<family>/` | Bundled, trusted schema-1 manifests and inert marker-bearing templates |
-| `build.sh` | Builds with swiftc over the app, core, and integration sources, copies `Resources/Integrations/`, and applies an ad-hoc signature |
-| `AwakeLite.app/` | Ignored generated app bundle, not authoritative source |
-
-The menu-bar app is still the process-based prototype: it treats process presence as activity and is unchanged apart from the Integrations… menu item that opens the catalog window. The core and integration code are not wired to power policy or to any harness. Installed entries are inert marker-bearing templates; no adapters or helper executable exist, every target is unverified, and Check connection reports no confirmed connection. Do not invent test results or describe proposed files as existing.
-
-## Planned ownership map
-
-The following are proposed destinations, not files to create during documentation work. Keep small source groups; separate frameworks and one-file-per-type scaffolding are unnecessary.
-
-| Responsibility | Proposed location | Boundary |
+| Responsibility | Owning files | State |
 | --- | --- | --- |
-| App lifecycle and menu | Existing app and controller files | Present state and apply user actions; no vendor parsing |
-| Activity model and reducer | `Sources/Core/Activity.swift` | Pure state transitions, work identity, uncertainty, aggregate decision |
-| Local event storage | `Sources/Core/LocalEventStore.swift` | Safe inbox, bounded retention, checkpoint, replay |
-| Hook normalization | `Sources/HookNormalizer.swift` | Parse only allowed metadata; no raw payload persistence |
-| Integration catalog and installation | `Sources/Integrations/` | One package list, previews, owned edits, receipts, recovery |
-| Catalog UI | `Sources/IntegrationsView.swift` | Package cards, connection status, user actions |
-| Vendor-specific observation | A compact adapter source group; `Sources/OpenCodeAdapter.swift` for native API reads | Keep vendor contracts out of the shared reducer |
-| Power assertions | `Sources/PowerAssertion.swift`, or a small boundary in the existing controller | Exactly one assertion owner; report real IOKit results |
-| Native helper executable | `Helper/main.swift` | Short-lived ingestion only; no UI or persistent daemon |
-| Optional package assets | `Resources/Integrations/<family>/` | Bundled manifests, hook templates, Pi and OMP extensions |
-| Behavioral fixtures and checks | `Tests/` and a documented verification command | Created with approved implementation; assert observable behavior |
+| Menu, pause, quit, login item | `Sources/AwakeLiteApp.swift`, `AwakeController.swift`, `LoginItem.swift` | Exists; model input is disconnected |
+| Power assertion | `Sources/PowerAssertion.swift` | Exists; current native behavior is unverified |
+| Activity and persistence | `Sources/Core/Activity.swift`, `LocalEventStore.swift` | Exists; earlier fixture evidence is in STATE |
+| OMP extension and mapping | `Resources/Integrations/omp/`, `Sources/Adapters/OMPAdapter.swift` | Exists; no live OMP acceptance |
+| Helper and normalization | `Helper/main.swift`, `Sources/Adapters/HelperRunner.swift`, `OwnerIdentity.swift`, `Sources/HookNormalizer.swift` | Exists; emits lifecycle metadata |
+| Installation and activation | `Sources/Integrations/` | Exists; startup handoff is not connected |
+| Catalog UI | `Sources/IntegrationsView.swift` | Exists; broad catalog work is deferred |
+| Other adapters | `Sources/Adapters/PiAdapter.swift`, `CodexAdapter.swift`, `OpenCodeAdapter.swift` | Preserved; outside the first version |
+| Behavioral checks | `Tests/AwakeLiteCoreTests/` | Includes fixtures and a real IOKit test |
 
-Exact file boundaries remain adjustable during implementation. Update this map when actual ownership changes. Keep the existing build correct when introducing a helper or nested source directories. Do not create empty modules merely to match this table.
+The observer scheduler and the app-owned startup/reconcile path are missing. Do not create empty modules to match an ownership table.
 
-## Product invariants
+## Keep development bounded
 
-- Scope is Claude Code CLI and local desktop Code; Codex CLI and local desktop; Cursor desktop Agent; Antigravity CLI and local desktop; Pi CLI; OMP CLI; OpenCode local TUI and service.
-- Install only selected integration support. Do not download harnesses. Do not infer desktop compatibility from CLI behavior.
-- An open process, low CPU, silence, or elapsed time does not establish work or idle state.
-- Preserve previously confirmed unfinished work when observation becomes unknown. Do not invent completion from a timeout.
-- Track independent work and generations. Waiting parents, live children, duplicate events, late completion, and PID reuse must not corrupt another task.
-- One app-owned model determines one IOKit assertion. The helper and adapters never own power policy.
-- No mandatory extra runtime, persistent helper daemon, privileged service, analytics, lid control, pmset modification, or lock-screen bypass.
-- Persist lifecycle metadata only. Do not read transcripts or store prompts, responses, tool arguments, raw hook payloads, or credentials to detect activity.
+- Work on one recovery unit at a time. End it with the observable result and evidence defined in ROADMAP.
+- Reuse the existing OMP extension, helper, model, and power boundary. Establish a working path before replacing infrastructure.
+- Do not add adapters, desktop support, a new installer, a daemon, a second event transport, or a generic plugin framework before OMP live acceptance.
+- Keep other families inactive in the first-version runtime. Preserve their files and installed configuration until a separately scoped change addresses them.
+- Do not restore process presence or a silence timeout as activity evidence.
+- Stop at a missing OMP lifecycle contract. Report the exact limitation instead of compensating with speculative infrastructure.
+- After OMP acceptance, inspect dependencies and remove unused parts in a bounded change. A smaller line count alone is not an acceptance criterion.
 
-Detailed transition and acceptance rules belong in SPEC and ARCHITECTURE.
+## Preserve contracts
 
-## Implementation procedure after approval
+One app-owned model determines one IOKit assertion. The helper and adapters never own power policy. Pause suppresses the assertion while preserving observed state.
 
-1. Confirm the approved unit and acceptance IDs. Update STATE to record implementation authorization and the active unit.
-2. Inspect the smallest relevant source boundary and the current vendor contract before changing it.
-3. Prove the core on isolated fixtures before connecting real harnesses. The first unresolved design check is bounded event storage and crash-safe recovery.
-4. Verify installation and removal in an isolated home or configuration root before touching real settings.
-5. Integrate one target at a time. Do not restart the shared OpenCode service, terminate user processes, or disturb existing sessions to attach an observer.
-6. Run checks appropriate to the unit, inspect the diff, and record evidence and limitations in STATE.
+An open process, low CPU, silence, or elapsed time establishes neither work nor completion. Keep previously confirmed unfinished work uncertain when observation is lost. Preserve independent work, generations, duplicate rejection, and PID-reuse protection. Do not let one task clear another task's uncertainty.
 
-Only the app writes model checkpoints. Independent hook writers publish separate immutable events. Checkpoint and event cleanup must survive crashes without losing facts. Bound storage and report gaps rather than silently discarding required history.
+Only the app writes model checkpoints. Hook writers publish separate immutable events. Save the checkpoint before event cleanup. Bound storage and surface loss instead of silently dropping required facts.
 
-Accept events only from enabled packages with the correct activation generation. Removal and reinstall must reject events from old in-flight hooks. Preserve causal scope; a new unrelated task cannot clear an older observation gap.
+Accept events only from enabled packages with the correct activation generation. Removal and reinstall must reject old in-flight hooks. A manual setup must not bypass activation checks.
 
-The installer changes only owned configuration entries. Preserve foreign settings, check preview freshness, use receipts, and avoid rollback over later user edits. Do not execute commands from untrusted manifests. Respect hook trust and workspace policies.
+Use the existing installer for the OMP proof. Preserve foreign settings, preview freshness, receipts, journal recovery, and hash-checked rollback. Test configuration edits in isolated roots first. Do not run commands from untrusted manifests or bypass agent trust policies.
 
-## Verification and completion
+Persist lifecycle metadata only. Do not read transcripts or store prompts, responses, tool arguments, raw hook bodies, or credentials. Use public macOS APIs without a privileged service, persistent helper daemon, additional mandatory runtime, analytics, lid control, `pmset` changes, or lock-screen bypass.
 
-For documentation-only changes, inspect the diff, local links, terminology, scope counts, and acceptance IDs. Do not build or launch the app to validate prose.
+## Verify and report
 
-The documented check for the core and integration units is `swift test` (XCTest), currently 153 checks: 66 Stage 1 core, 46 catalog/manifest/discovery, 27 installer, 10 activation handoff, and 4 privacy. The SwiftPM test target covers `Sources/Core/` and `Sources/Integrations/`; the `Sources/*.swift` app sources are excluded and compiled solely by `./build.sh`. The app build command remains `./build.sh`; it recreates the generated app bundle. Do not claim results without running them.
+For documentation changes, inspect the diff, local links, scope, and acceptance references. Do not build, run tests, launch the app, or change real settings just to validate prose.
 
-Runtime, concurrency, and configuration changes need focused review and behavioral checks. Keep these evidence levels separate: source inspection, fixtures, compilation, real IOKit behavior, and live per-target acceptance. Record the tested product version and execution mode. Missing products remain unverified; do not download them to close a gate.
+For implementation, run checks relevant to the unit and inspect the final diff. `swift test` compiles the library and helper target. The library includes `Sources/PowerAssertion.swift`; the app entry point, controller, login item, and catalog UI compile through `./build.sh`. The build script recreates the generated `AwakeLite.app` and signs the helper before the bundle. `codesign --verify --strict AwakeLite.app` verifies the result.
 
-Use at most two automatic repair rounds per bounded unit, then reassess unresolved failures. Prefer targeted follow-up checks over repeated broad reviews.
+The full test suite contains `PowerPolicyTests.testRealIOKitAssertionIsCreatedAndReleased`, which creates a real temporary sleep assertion and may skip if acquisition is refused. Do not call every test fixture-only or treat a skipped native test as a pass.
 
-Update STATE when actual progress or evidence changes. Update ROADMAP only when the plan changes. Update README when user-facing behavior or build steps change. Do not create duplicate progress logs or handoff files.
+Keep source inspection, fixtures, compilation, real IOKit behavior, and live OMP acceptance separate. Record versions, execution mode, failures, and skipped checks in STATE. Earlier passing runs do not prove the current worktree.
 
-Work directly by default. Delegate only bounded independent work when it improves the result, and explicitly select an available suitable model. Do not route work automatically to OpenCode, Pi, or OMP.
+Runtime, concurrency, permissions, and configuration changes require focused deeper review and behavioral checks. Use at most two automatic repair rounds for one bounded unit before reassessing. Do not repeat broad checks without new evidence.
 
-Do not commit, push, publish, upload releases, or install into system locations without authorization for that action. Before finishing, report changes, evidence, remaining work, and blockers. Never present unverified functionality as complete.
+Work directly by default. Use optional subagents only for bounded independent tasks that improve the result, with an explicitly selected suitable model. Do not route work to OMP or OpenCode automatically.
+
+Update STATE when evidence changes, ROADMAP when the plan changes, and README when user-facing behavior or build instructions change. Do not create duplicate progress logs. Report changes, verification, remaining work, and blockers without claiming unverified behavior is complete.

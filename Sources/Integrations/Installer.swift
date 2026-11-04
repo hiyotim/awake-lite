@@ -19,6 +19,9 @@ enum InstallerError: Error, Equatable, CustomStringConvertible {
     case receiptUnreadable(path: String, detail: String)
     case journalUnreadable(path: String, detail: String)
     case writeFailed(path: String, detail: String)
+    /// No helper executable at the supplied bundle path, so an installed hook
+    /// could never run. Refused before any mutation.
+    case helperUnavailable(path: String)
 
     var description: String {
         switch self {
@@ -52,6 +55,8 @@ enum InstallerError: Error, Equatable, CustomStringConvertible {
             return "journal \(path) cannot be read: \(detail)"
         case .writeFailed(let path, let detail):
             return "cannot write \(path): \(detail)"
+        case .helperUnavailable(let path):
+            return "helper executable is missing at \(path); refusing to install a hook that cannot run"
         }
     }
 }
@@ -411,6 +416,13 @@ struct Installer {
     /// plan before any mutation.
     func apply(_ preview: InstallPreview, now: Date = Date()) throws -> InstallReceipt {
         let plan = preview.plan
+        // The helper path is an install input, not only a rendered value: a
+        // preview built with a different one described different bytes.
+        guard preview.helperPath == plan.helperPath, plan.helperPath == helperPath else {
+            throw InstallerError.stalePreview(
+                "the helper path changed since the preview was produced"
+            )
+        }
         let storage = InstallerStorage(root: URL(fileURLWithPath: plan.appSupportRoot, isDirectory: true))
 
         try recoverPending(appSupportRoot: storage.root)

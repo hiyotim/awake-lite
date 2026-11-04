@@ -468,6 +468,36 @@ final class ActivityModelTests: XCTestCase {
         XCTAssertEqual(model.decision.state, .working)
     }
 
+    func testOwnerTerminatedDoesNotEndWorkObservedAfterTheEvent() {
+        let shared = session("s1")
+        let sharedOwner = owner()
+        XCTAssertEqual(
+            model.apply(start("ot-new", session: shared, work: "turn-2", owner: sharedOwner, at: 200)),
+            .applied
+        )
+
+        // A detached teardown can land after a later start. It cannot retire
+        // work that was observed after its own timestamp.
+        let lateTermination = ActivityEvent(
+            id: "ot-late",
+            source: family,
+            activationGeneration: 1,
+            owner: sharedOwner,
+            session: shared,
+            transition: .ownerTerminated,
+            timestamp: date(150)
+        )
+        XCTAssertEqual(model.apply(lateTermination), .applied)
+        XCTAssertEqual(record(for: shared, work: "turn-2")?.state, .working)
+        XCTAssertEqual(
+            record(for: shared, work: "turn-2")?.updatedAt,
+            date(200),
+            "a late termination never moves freshness backwards"
+        )
+        XCTAssertEqual(model.decision.state, .working)
+        XCTAssertTrue(model.decision.holdAssertion)
+    }
+
     func testRetireForeignBootsHoldsPreviousBootWork() {
         let shared = session("s1")
         XCTAssertEqual(

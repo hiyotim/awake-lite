@@ -6,16 +6,19 @@
   "requiresRestart": true,
   "requiresHookTrust": true,
   "notes": [
-    "CLI and desktop targets are unverified; desktop chats need a separate live check.",
-    "Hook config shape is the best-documented default and may differ by version.",
-    "Restart the harness after install so hooks load; local versus cloud orchestration differs."
+    "No live Codex event delivery has been observed. codex.cli is fixture-level: installation, placeholder rendering, and normalization are fixture-covered. codex.desktop stays unverified because delivery for an ordinary local desktop chat is unproven.",
+    "Installed entries are inline [[hooks.<Event>]] tables in ~/.codex/config.toml. Codex skips untrusted non-managed hooks, so open /hooks in Codex once, review the seven AwakeLite entries, and trust them. Editing the block later changes each handler hash and requires a new review.",
+    "Every handler is a background command hook: it never delays a turn, blocks a tool, answers an approval prompt, continues a turn, or adds model context.",
+    "Restart Codex after install so the configuration reloads. Hooks are enabled by default; if hooks were disabled in Codex settings, AwakeLite does not re-enable them.",
+    "Both steps share one asset, so one family install writes two blocks (one per target) and Codex runs each event once per target. Every event carries its own --target, and the model keeps one work record per turn, so state converges; the cost is two short-lived helper runs per event.",
+    "Local and cloud orchestration differ: the vendor contract excludes local command hooks from cloud orchestration, so cloud-orchestrated work is not observed and no work is invented. An ordinary local desktop chat is still unverified."
   ],
   "targets": [
     {
       "id": "codex.cli",
       "mode": "cli",
       "capabilities": ["lifecycleHooks"],
-      "verificationLevel": "unverified"
+      "verificationLevel": "fixture"
     },
     {
       "id": "codex.desktop",

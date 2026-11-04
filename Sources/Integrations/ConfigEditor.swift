@@ -32,14 +32,34 @@ enum Template {
     }
 
     /// Substitutes known placeholders in free text (TOML, YAML, text, and
-    /// plugin sources). Values are escaped for a double-quoted context, which
-    /// is where every bundled template places them.
+    /// plugin sources) in one left-to-right scan. Values are escaped for a
+    /// double-quoted context, which is where every bundled template places
+    /// them.
+    ///
+    /// A substituted value is never rescanned: a value that itself contains
+    /// another `{token}` stays literal instead of being expanded, so app-owned
+    /// text (a path, a marker, a target) cannot inject a second placeholder
+    /// into installed bytes.
     static func renderText(_ text: String, values: [String: String]) -> String {
-        var result = text
-        for key in allowed.sorted() {
-            guard let value = values[key] else { continue }
-            result = result.replacingOccurrences(of: "{\(key)}", with: escaped(value))
+        guard text.contains("{") else { return text }
+        var result = ""
+        result.reserveCapacity(text.count)
+        var index = text.startIndex
+        while let open = text[index...].firstIndex(of: "{") {
+            guard let close = text[open...].firstIndex(of: "}") else { break }
+            let token = String(text[text.index(after: open)..<close])
+            if allowed.contains(token), let value = values[token] {
+                result += text[index..<open]
+                result += escaped(value)
+                index = text.index(after: close)
+            } else {
+                // Not a known placeholder with a value: keep the brace and
+                // resume the scan after it. The remaining text is unchanged.
+                result.append(contentsOf: text[index...open])
+                index = text.index(after: open)
+            }
         }
+        result.append(contentsOf: text[index...])
         return result
     }
 
@@ -112,9 +132,44 @@ enum Template {
 // MARK: - Placeholder constants
 
 enum IntegrationPaths {
-    /// Documented location of the short-lived ingestion helper inside the app
-    /// bundle. Stage 3 ships the executable; nothing exists there yet.
+    /// Documented default for the short-lived ingestion helper: the location
+    /// `build.sh` signs inside a bundle installed in `/Applications`.
+    ///
+    /// It is a default, not the only source. Tests and a non-bundled context
+    /// use it, while the app resolves the helper of its own running bundle
+    /// with `HelperResolver` and passes that value into the installer, so a
+    /// bundle built or copied anywhere else installs the path where its helper
+    /// actually exists.
     static let helperPath = "/Applications/AwakeLite.app/Contents/MacOS/AwakeLiteHelper"
+
+    /// File name `build.sh` gives the helper inside `Contents/MacOS`.
+    static let helperExecutableName = "AwakeLiteHelper"
+}
+
+/// Resolves the helper executable that ships inside an app bundle.
+///
+/// The installer never guesses where its helper lives: the caller supplies the
+/// path, and the app supplies the path of its own running bundle. The existence
+/// check turns a bundle without a helper into a refusal instead of an installed
+/// hook that can never run and fails silently.
+enum HelperResolver {
+    /// `bundleURL/Contents/MacOS/AwakeLiteHelper`, refusing when that path is
+    /// absent or is not a regular file.
+    static func resolve(
+        appBundle bundleURL: URL,
+        fileManager: FileManager = .default
+    ) throws -> String {
+        let executable = bundleURL
+            .appendingPathComponent("Contents", isDirectory: true)
+            .appendingPathComponent("MacOS", isDirectory: true)
+            .appendingPathComponent(IntegrationPaths.helperExecutableName, isDirectory: false)
+        var isDirectory: ObjCBool = false
+        guard fileManager.fileExists(atPath: executable.path, isDirectory: &isDirectory),
+              !isDirectory.boolValue else {
+            throw InstallerError.helperUnavailable(path: executable.path)
+        }
+        return executable.path
+    }
 }
 
 // MARK: - File state

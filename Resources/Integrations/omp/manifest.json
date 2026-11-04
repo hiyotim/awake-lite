@@ -6,23 +6,24 @@
   "requiresRestart": true,
   "requiresHookTrust": false,
   "notes": [
-    "CLI target is unverified.",
-    "Auto-retry, continuation queues, and background work need a separate live check.",
-    "Extension directory is the best-documented default."
+    "CLI target is fixture-level, not live: no live OMP run was performed. Adapter fixtures cover the documented extension event shapes.",
+    "Extension source follows the documented default factory, event names, and ~/.omp/agent/extensions/<name>/index.js discovery.",
+    "agent_end is notification-only; session_stop is the main-session completion boundary and defers until agent-owned background work is idle.",
+    "Auto-retry, continuation queues, and subagent identity are mapped from documented events; delivery order is unverified."
   ],
   "targets": [
     {
       "id": "omp.cli",
       "mode": "cli",
       "capabilities": ["inProcessExtension"],
-      "verificationLevel": "unverified"
+      "verificationLevel": "fixture"
     }
   ],
   "assets": [
     {
       "id": "extension",
       "source": "assets/awake-lite.omp.js",
-      "destination": "extensions/awake-lite.omp.js"
+      "destination": "extensions/awake-lite/index.js"
     }
   ],
   "steps": [
@@ -31,7 +32,7 @@
       "target": "omp.cli",
       "format": "text",
       "configRoot": "~/.omp/agent/extensions",
-      "path": "awake-lite/awake-lite.omp.js",
+      "path": "awake-lite/index.js",
       "ownedEntries": [
         {
           "marker": "awake-lite/omp.cli/extension",

@@ -162,7 +162,9 @@ struct LocalEventStore {
     ///
     /// Identifiers must already be canonical: the file name is derived from
     /// them, so a value that sanitizing would change is refused rather than
-    /// silently aliased.
+    /// silently aliased. Re-enqueuing the exact same event is idempotent — the
+    /// stored bytes are already identical — while a different payload under an
+    /// existing name is refused rather than merged.
     func enqueue(_ event: ActivityEvent) throws {
         try prepare()
         guard EventFileName.sanitize(event.source) == event.source,
@@ -189,15 +191,21 @@ struct LocalEventStore {
 
     /// Creates the event file without ever replacing an existing one: the
     /// written temporary file is hard-linked into place, so a concurrent
-    /// writer or a case-insensitive volume that folds two IDs into one name
-    /// gets `EEXIST` and a suffixed retry instead of a silent overwrite.
+    /// writer cannot overwrite a fact.
+    ///
+    /// A name that already exists is compared byte-for-byte with the candidate.
+    /// Identical content is the same event arriving twice (a retry, or two
+    /// producers emitting the same normalized event), so it is an idempotent
+    /// replay: success and no new file. Different content under one name would
+    /// silently merge two facts — a reused identifier, or a case-insensitive
+    /// volume folding two IDs — so it is refused instead of suffixed into a
+    /// second file the model would treat as the same observation.
     private func writeLinked(_ data: Data, named name: String, in directory: URL, mode: mode_t) throws {
         let temporary = try writeTemporaryFile(data, in: directory, name: name, mode: mode)
         defer { _ = temporary.path.withCString { unlink($0) } }
 
-        var candidate = name
+        let destination = directory.appendingPathComponent(name)
         for _ in 0..<8 {
-            let destination = directory.appendingPathComponent(candidate)
             let result = temporary.path.withCString { source in
                 destination.path.withCString { target in
                     link(source, target)
@@ -211,9 +219,46 @@ struct LocalEventStore {
                 return
             }
             guard errno == EEXIST else { throw StoreError.posix(errno) }
-            candidate = Self.uniqueName(for: name)
+
+            guard let existing = try readExistingEvent(at: destination) else {
+                // The occupant vanished between the link attempt and the read;
+                // the name is free again, so try once more.
+                continue
+            }
+            guard existing == data else {
+                throw StoreError.writeFailed(Self.conflictingEventDetail)
+            }
+            // The exact event is already stored: this write is a replay, so it
+            // succeeded without adding a file.
+            return
         }
         throw StoreError.posix(EEXIST)
+    }
+
+    /// Detail for two different payloads competing for one event name.
+    private static let conflictingEventDetail =
+        "an event with the same identifier already exists with different content"
+
+    /// Reads the file already occupying an event name. `nil` means it vanished,
+    /// so the caller can retry the link. A non-regular, symlinked, or oversized
+    /// occupant cannot be the candidate, which the caller then refuses.
+    private func readExistingEvent(at url: URL) throws -> Data? {
+        // O_NOFOLLOW keeps a symlink from being read as stored evidence.
+        let descriptor = url.path.withCString { open($0, O_RDONLY | O_NOFOLLOW | O_CLOEXEC) }
+        guard descriptor >= 0 else {
+            if errno == ENOENT { return nil }
+            throw StoreError.posix(errno)
+        }
+        defer { _ = Darwin.close(descriptor) }
+
+        var info = stat()
+        guard fstat(descriptor, &info) == 0,
+              (info.st_mode & S_IFMT) == S_IFREG,
+              info.st_size <= off_t(limits.maxEventBytes)
+        else {
+            throw StoreError.writeFailed(Self.conflictingEventDetail)
+        }
+        return try readAll(from: descriptor)
     }
 
     // MARK: - Reconciliation

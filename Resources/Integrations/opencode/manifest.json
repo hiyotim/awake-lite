@@ -6,16 +6,17 @@
   "requiresRestart": true,
   "requiresHookTrust": false,
   "notes": [
-    "Local TUI target is unverified.",
-    "Connector is read-only; it never restarts the existing local service.",
-    "Session presence alone is not work; execution details need a live check."
+    "Local TUI target is fixture-level, not live: the API shape and event mapping are fixture-tested only.",
+    "Connector is app-side and read-only: it reads /api/session/active plus per-session execution detail, permissions, and forms, and never restarts or reconfigures the existing local service.",
+    "Session presence alone is not work: a listed session holds sleep only when its running execution detail proves work and no permission or form is pending.",
+    "The installed file is an inert marker-bearing template. Vendor fields are fixture-tested, not live-verified."
   ],
   "targets": [
     {
       "id": "opencode.tui",
       "mode": "cli",
       "capabilities": ["readOnlyConnector"],
-      "verificationLevel": "unverified"
+      "verificationLevel": "fixture"
     }
   ],
   "assets": [

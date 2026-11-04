@@ -1,142 +1,52 @@
 # AwakeLite
 
-A small native macOS menu-bar app. The existing prototype keeps the Mac awake while an opencode, omp, or codex process exists. It releases its idle-sleep assertion after three empty checks, roughly 10–15 seconds after the last matching process exits. It uses Swift, SwiftUI, public Apple APIs, and no external dependencies. Requires macOS 13 or later.
+AwakeLite is a native macOS menu-bar utility intended to prevent automatic system sleep while a coding agent works. The first working version now targets OMP CLI only. It must permit sleep when work ends or waits for a person, even if the conversation stays open.
 
-The event-based version is approved for implementation. Stage 1 (independent work model, bounded event storage, crash-safe recovery) and Stage 2 (local catalog and installer: seven bundled manifests, install previews, receipts, removal, recovery, and the activation-generation handoff) exist and are fixture-verified. The menu-bar app itself is still the process-based prototype described below, and the integration code is not wired to power policy or to any harness.
+## Current state
 
-## Project documents
+The source is an incomplete migration, not a verified keep-awake app. The old process scanner has been removed in the worktree. The new controller starts idle, and no app caller feeds agent activity into it. `PowerPolicy` exists, but the app does not connect event ingestion, model reconciliation, and power decisions.
 
-| Document | Purpose |
+OMP's extension, helper, activity model, event store, installer, and power boundary already exist. The next development task is to connect those components, prove the path in isolated roots, and then check real OMP delivery. No target has live acceptance. Current source inspection does not establish the behavior of an older generated or installed bundle.
+
+The repository still contains seven integration families and ten manifest targets from the earlier plan. Their presence is not a compatibility promise. Other families and catalog expansion are deferred; documentation cleanup has not removed their code or changed installed support.
+
+## Continue development
+
+Read these documents in order:
+
+| Document | Question it answers |
 | --- | --- |
-| [SPEC.md](SPEC.md) | Proposed requirements, agreed scope, and acceptance criteria |
-| [ARCHITECTURE.md](ARCHITECTURE.md) | Proposed module boundaries, data flow, and recovery |
-| [ROADMAP.md](ROADMAP.md) | Work order and exit criteria after approval |
-| [STATE.md](STATE.md) | Actual progress, evidence, and remaining questions |
-| [AGENTS.md](AGENTS.md) | Agent navigation, ownership map, and working instructions |
-| [HARNESS_RESEARCH.md](HARNESS_RESEARCH.md) | Dated source survey, broader than the current scope |
+| [STATE.md](STATE.md) | What exists, what is broken, and what was actually checked? |
+| [SPEC.md](SPEC.md) | What must the OMP version do? |
+| [ROADMAP.md](ROADMAP.md) | What is the next bounded task and its exit check? |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | Which existing component owns the behavior? |
+| [AGENTS.md](AGENTS.md) | How must a coding agent work in this repository? |
+| [HARNESS_RESEARCH.md](HARNESS_RESEARCH.md) | What did the earlier source survey report? |
 
-## Current prototype behavior
+Start with ROADMAP R1. Get one OMP path working before adding integrations or replacing infrastructure. Preserve current uncommitted work before resets, deletion, or branch changes.
 
-The prototype answers one question: does a matching process exist? It does not read agent output, logs, or sockets, and does not distinguish work from waiting for input. An open idle agent also keeps the Mac awake. Use **Pause** to release the hold manually.
+## Build and checks
 
-The interface has not been translated as part of the documentation work. UI action names in this README are English descriptions of the current controls.
+Requires macOS 13 or later and Apple Command Line Tools. The project uses SwiftPM for the library and helper tests, and `swiftc` for the app. There is no Xcode project.
 
-## Historical process-name investigation
-
-The original checks ran on 2026-10-31 on a Linux VPS running Ubuntu 24.04. This subsection establishes no macOS behavior. Later local macOS checks are listed under Verification.
-
-| Check | Result on the VPS |
-| --- | --- |
-| `pgrep -lx opencode` | Empty, exit 1 |
-| `pgrep -x opencode` | Empty, exit 1 |
-| `pgrep -x opencode.exe` | Finds PIDs |
-| `pgrep -f 'opencode'` | Finds agents and the shell running the command |
-| `pgrep -f '(^\|/)opencode(\.exe)?( \|$)'` | Finds only agents in that check |
-| omp | Not running; its process name was not confirmed |
-
-The real process on that VPS was named opencode.exe:
-
-```
-/home/hiyori/.local/lib/node_modules/@opencode/cli/bin/opencode.exe serve --service
-/home/hiyori/.local/lib/node_modules/@opencode/cli/bin/opencode.exe run --format json ...
-```
-
-These observations led to the current scanner:
-
-1. Exact `pgrep -x <name>` alone misses opencode on that VPS because the process is named opencode.exe. The scanner first tries an exact name, then an anchored command-line match.
-2. The anchored `(^|/)NAME(\.exe)?( |$)` pattern accepts a path before the name and an optional .exe suffix. It rejects the checked `vim opencode.swift` case.
-3. Command-line matching can still match an unrelated process whose arguments contain a path component with that name, such as `bash -c 'cd ~/opencode && ...'`. This is a documented limitation of the current -f fallback.
-
-The watched array contains bare names: `["opencode", "omp", "codex"]`.
-
-- opencode is the agent name from the original brief. The scanner adds the optional .exe form instead of requiring another array entry.
-- omp is also from the original brief. Neither its exact process name nor command line was confirmed on the VPS. If macOS uses a different name such as omp-cli, verify it before changing the array.
-- codex was added after a local macOS inspection on 2026-10-31 found a process at `.../CodexCLI.app/Contents/MacOS/codex`. Presence keeps the current prototype awake even without an active task. Chat activity is not inspected.
-- node and bun were not added. Watching every Node process would keep the Mac awake for unrelated programs.
-
-The opencode and omp process names on macOS were not confirmed by these prototype checks. The array retains the names from the brief, and the scanner tries two matching forms.
-
-## Build the current prototype
-
-Requires macOS 13 or later and Command Line Tools (`xcode-select --install`). The bundle is built directly with swiftc; there is no Xcode project.
+For an implementation task, the check commands are:
 
 ```sh
-chmod +x build.sh
+swift test
 ./build.sh
-open AwakeLite.app
+codesign --verify --strict AwakeLite.app
 ```
 
-build.sh recreates AwakeLite.app, compiles `Sources/*.swift`, `Sources/Core/*.swift`, and `Sources/Integrations/*.swift`, copies `Resources/Info.plist` and `Resources/Integrations/` into `AwakeLite.app/Contents/Resources/Integrations/`, and applies an ad-hoc signature. LSUIElement hides the Dock icon. Do not rebuild or launch the app unless the current task authorizes it.
+`swift test` includes `PowerAssertion.swift`, the core, integrations, adapters, normalizer, and the helper target. The app entry point, controller, login item, and catalog UI compile through `build.sh`. The full test suite contains a real IOKit assertion test and is not entirely fixture-only. A skipped IOKit test does not establish native behavior.
 
-### Integration catalog window (Stage 2, fixture-verified, not visually exercised)
+`build.sh` recreates the local generated `AwakeLite.app`, builds the helper into `Contents/MacOS/AwakeLiteHelper`, copies bundled integration resources, and signs the helper before the app. A successful build does not establish OMP event delivery or correct sleep behavior. Documentation-only changes require no build or app launch.
 
-The **Integrations…** menu item opens a catalog window with seven cards (Claude Code, Codex, Cursor, Antigravity, Pi, OMP, OpenCode). Each card shows per-target availability, the verification level, installation status, and required actions, with **Install support**, **Remove support**, **Check connection**, and **Show changes**; installation runs through a preview sheet that restates the exact paths and owned entries before confirmation.
+For an authorized runtime check, launch the local bundle with `open AwakeLite.app`. Building and launching do not install it into `/Applications` or configure OMP. Prepare OMP setup separately through the existing preview and receipt path. The catalog store resolves the helper from the current app bundle and refuses setup when resolution fails; path escaping still needs verification for the chosen location.
 
-Installed entries are inert marker-bearing templates, not live hook wiring: no event adapters and no helper executable exist yet, every target is `unverified`, and **Check connection** therefore reports no confirmed connection. The window layout was not visually exercised; the store-level pass (every action routing to the installer API) substitutes for the manual GUI pass.
+## Evidence and limits
 
-### Core and integration checks
+The last recorded full run on 2026-11-01 had 272 tests passing. The current source declares 294 test methods, including 12 power-policy and 10 helper-path methods added afterward. This is a source count, not a new passing run. Historical build, fixture, helper-smoke, and compatibility evidence is in STATE.
 
-`swift test` (XCTest, no app launch) covers the Stage 1 core and the Stage 2 catalog/installer: 153 checks, 0 failures as of 2026-11-01 — 66 Stage 1 (`Sources/Core/`) + 46 Catalog + 27 Installer + 10 Activation + 4 Privacy. The SwiftPM test target compiles `Sources/Core/` and `Sources/Integrations/` only; the app/UI sources (`Sources/*.swift`, including `Sources/IntegrationsView.swift`) are compiled solely by `./build.sh`, not by the test target.
+The original process-based version had 176 Swift lines and watched opencode, omp, and codex. It treated an open process as activity and could not distinguish work from waiting. Historical scanner checks do not validate the current event-based app.
 
-## Verification
-
-### Local macOS checks on 2026-10-31
-
-After adding codex to the watched names:
-
-- The bundle was compiled with swiftc using a separate temporary module cache and signed ad hoc. `codesign --verify --strict AwakeLite.app` succeeded.
-- The existing ProcessScanner detected a real codex process and did not detect a deliberately absent control name.
-- The app was not launched for those checks. Sleep assertions, menu behavior, launch at login, and battery use were not verified.
-
-Architecture and documentation translation have not changed product sources or repeated runtime verification.
-
-### Original Linux VPS checks on 2026-10-31
-
-These were reported for Ubuntu 24.04, not macOS:
-
-- `swiftc -parse` on all Sources/*.swift with Swift 6.0 exited 0. Parsing is not type checking or a build.
-- ProcessScanner, which uses only Foundation, was compiled and run on Linux. It found the real opencode.exe despite an empty `pgrep -x opencode`; did not find the absent omp; found a launched omp.exe; and rejected `vim editorproc.swift`. It also reproduced the documented false-positive case involving a shell command line containing a matching path.
-- Resources/Info.plist parsed and contained LSUIElement = true and LSMinimumSystemVersion = 13.0.
-- `bash -n build.sh` passed.
-- The prototype contained 176 Swift lines across four files, with 157 nonempty lines.
-
-The original Linux checks did not verify:
-
-- macOS compilation or type checking against SwiftUI, IOKit, and ServiceManagement.
-- Live MenuBarExtra, menu icon, or LSUIElement behavior.
-- IOPM assertion acquisition and release, or entries in `pmset -g assertions`.
-- SMAppService launch at login, which needs an app bundle and macOS settings approval.
-- The original seven acceptance scenarios below.
-- macOS process names for opencode and omp.
-
-## Original manual Mac checks, not performed
-
-These apply to the current process-based prototype, not to the proposed event-based specification's A01–A17:
-
-```sh
-./build.sh
-open AwakeLite.app
-```
-
-1. With no agents, the icon is moon.zzz and pmset lists no AwakeLite assertion.
-2. Start opencode. Within five seconds, the icon becomes cup.and.saucer.fill and an assertion appears.
-3. Close opencode. The assertion disappears within roughly fifteen seconds.
-4. Run opencode and omp. Closing one preserves the assertion; closing the last releases it.
-5. Enable Pause while an agent runs. The assertion disappears. Disable Pause and it returns.
-6. Quit with a hold active. The assertion disappears.
-7. Check Activity Monitor for background CPU use.
-
-If `pgrep -lx omp` on macOS reports another name, verify it before updating AwakeController.watched.
-
-## Items excluded from the original prototype
-
-The original prototype excluded work-versus-input detection, editable process lists, custom patterns, PID verification through `ps -o comm=`, notifications, history, statistics, closed-lid control, Developer ID distribution, notarization, App Store distribution, macOS CI, and localization.
-
-Some of these, especially activity detection, now belong to the proposed next version. Follow SPEC and ROADMAP for the current plan rather than treating this historical list as a permanent exclusion.
-
-## Current limitations
-
-- kIOPMAssertionTypePreventUserIdleSystemSleep prevents idle system sleep and permits display sleep.
-- Closed-lid behavior is outside the app's scope; the prototype does not override macOS clamshell policy.
-- The prototype is not App Sandbox enabled. It was designed for personal use; store distribution was not validated.
-- The assertion belongs to the process. If SIGKILL terminates it, macOS removes its assertion, although the normal IOPMAssertionRelease path does not run.
+The intended assertion prevents idle system sleep and permits display sleep. Closed-lid control, `pmset` changes, lock-screen bypass, analytics, and privileged services are outside scope. Automatic activity detection must not read or persist conversation content.

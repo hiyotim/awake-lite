@@ -1,97 +1,82 @@
 import AppKit
-import IOKit.pwr_mgt
+import Combine
 import SwiftUI
 
-/// Таймер опроса, счётчик пропусков и блокировка сна.
+/// App-side owner of the aggregate decision, pause, and the single power
+/// boundary. It never inspects processes and never polls: a decision arrives
+/// through `update(decision:)`, and only pause and quit change the policy
+/// directly.
 final class AwakeController: ObservableObject {
-    /// Имя агента, без суффикса `.exe`: вариант с ним добавляет шаблон сканера.
-    static let watched = ["opencode", "omp", "codex"]
-
-    @Published private(set) var statusText = "Агентов нет"
-    @Published private(set) var isHolding = false
     @Published private(set) var isPaused = false
+
+    /// The Stage 1 aggregate decision power is derived from. Nothing supplies
+    /// it yet (model wiring is Stage 5.3), so it starts as confirmed idle.
+    private(set) var decision = AggregateDecision(state: .idle, holdAssertion: false, reasons: [])
+
+    /// The only assertion owner in the app.
+    private let power = PowerPolicy()
+
+    private var statusObserver: AnyCancellable?
+    private var isTerminating = false
 
     var pauseBinding: Binding<Bool> {
         Binding(get: { self.isPaused }, set: { self.setPaused($0) })
     }
 
-    private let pollInterval: TimeInterval = 5
-    private let missesBeforeRelease = 3
-    private var timer: Timer?
-    private var misses = 0
-    private var assertionID: IOPMAssertionID = 0
-    private var holdsAssertion = false
+    /// The real IOKit state, not the intent to hold.
+    var powerStatus: PowerStatus { power.status }
+
+    var isHolding: Bool { power.status == .held }
+
+    var statusText: String {
+        switch (isPaused, power.status) {
+        case (true, .failedRelease(let code)):
+            return "Пауза, но IOKit не снял блокировку (\(Self.code(code)))"
+        case (true, _):
+            return "Пауза"
+        case (false, .idle):
+            return "Сон разрешён"
+        case (false, .held):
+            return "Сон заблокирован: идёт работа"
+        case (false, .failedAcquire(let code)):
+            return "Ошибка IOKit: блокировка не создана (\(Self.code(code)))"
+        case (false, .failedRelease(let code)):
+            return "Ошибка IOKit: блокировка не снята (\(Self.code(code)))"
+        }
+    }
 
     init() {
-        poll()
-        let timer = Timer(timeInterval: pollInterval, repeats: true) { [weak self] _ in
-            self?.poll()
+        // PowerPolicy publishes its own status; relay it so the menu reads
+        // the IOKit result rather than a mirrored intent.
+        statusObserver = power.$status.sink { [weak self] _ in
+            self?.objectWillChange.send()
         }
-        RunLoop.main.add(timer, forMode: .common)
-        self.timer = timer
+        power.update(decision: decision, paused: isPaused)
     }
 
-    deinit {
-        timer?.invalidate()
-        if holdsAssertion { IOPMAssertionRelease(assertionID) }
+    /// Connects the caller's aggregate decision. Repeated identical decisions
+    /// are absorbed by `PowerPolicy` and do not touch IOKit again.
+    func update(decision: AggregateDecision) {
+        guard !isTerminating else { return }
+        self.decision = decision
+        power.update(decision: decision, paused: isPaused)
     }
 
-    private func poll() {
-        let found = ProcessScanner.running(Self.watched)
-        misses = found.isEmpty ? misses + 1 : 0
-        if isPaused {
-            statusText = "Пауза"
-        } else {
-            statusText = found.isEmpty
-                ? "Агентов нет"
-                : "Агент запущен: " + found.joined(separator: ", ")
-        }
-        // Пока пустых проверок меньше трёх, ничего не меняем: это окно
-        // перезапуска агента, и отпускать блокировку в нём нельзя.
-        if isPaused {
-            setHolding(false)
-        } else if !found.isEmpty {
-            setHolding(true)
-        } else if misses >= missesBeforeRelease {
-            setHolding(false)
-        }
-    }
-
-    private func setPaused(_ paused: Bool) {
+    /// Pause releases immediately while the observation and task state in
+    /// `decision` is preserved; unpausing recomputes from it.
+    func setPaused(_ paused: Bool) {
+        guard !isTerminating, paused != isPaused else { return }
         isPaused = paused
-        poll()
+        power.update(decision: decision, paused: isPaused)
     }
 
     func quit() {
-        timer?.invalidate()
-        timer = nil
-        if holdsAssertion { release() }
+        isTerminating = true
+        power.releaseAll()
         NSApplication.shared.terminate(nil)
     }
 
-    private func setHolding(_ active: Bool) {
-        if active && !holdsAssertion { acquire() }
-        if !active && holdsAssertion { release() }
-    }
-
-    private func acquire() {
-        var id: IOPMAssertionID = 0
-        let status = IOPMAssertionCreateWithName(
-            kIOPMAssertionTypePreventUserIdleSystemSleep as CFString,
-            IOPMAssertionLevel(kIOPMAssertionLevelOn),
-            "AwakeLite: watched agent is running" as CFString,
-            &id
-        )
-        guard status == kIOReturnSuccess else { return }
-        assertionID = id
-        holdsAssertion = true
-        isHolding = true
-    }
-
-    private func release() {
-        IOPMAssertionRelease(assertionID)
-        assertionID = 0
-        holdsAssertion = false
-        isHolding = false
+    private static func code(_ result: IOReturn) -> String {
+        String(format: "0x%08X", UInt32(bitPattern: result))
     }
 }
