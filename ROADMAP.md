@@ -1,32 +1,45 @@
 # AwakeLite roadmap
 
-Updated: 2026-11-02. The first working version targets OMP CLI (`omp.cli`) only. This sequence replaces the former Stage 4–6 expansion order. [SPEC.md](SPEC.md) owns requirements; [STATE.md](STATE.md) owns evidence.
+Updated: 2026-11-04. The first working version targets OMP CLI (`omp.cli`) only. This sequence replaces the former multi-family expansion order. [SPEC.md](SPEC.md) owns requirements; [STATE.md](STATE.md) owns evidence.
 
 The first objective is a real OMP task that acquires and releases the app's sleep assertion. Reuse existing components before removing or replacing them. Do not add another adapter while that path is unverified.
 
 ## R0. Reset scope and documentation
 
-Status: documentation reset completed on 2026-11-02. No product source, tests, manifests, real settings, or Git history changed in this reset.
+Status: complete 2026-11-02. No product source changed in that reset.
 
 - Record OMP CLI as the only first-version target.
 - Describe the disconnected app and existing power boundary accurately.
-- Preserve earlier fixture evidence and unresolved contracts.
-- Replace the expansion plan with R1–R4 and update agent instructions.
+- Replace the expansion plan with a bounded sequence.
 
-Exit: documents agree on scope, actual state, work order, and evidence limits. R0 does not establish a working app.
+Exit: documents agree on scope. R0 did not establish a working app.
 
-## R1. Connect one isolated OMP path
+## R1a. Cut the shipped surface to OMP
 
-Status: next development unit. Covers the app-wiring parts of A01, A05, A07, A14, and A15.
+Status: complete 2026-11-04 in the worktree. The pre-cut state is commit `d6f1721` on branch `omp-only-minimal`.
 
-1. Inspect Git status and preserve existing work before source edits. A checkpoint commit requires the user's authorization; do not reset or discard files.
-2. Verify the current build and relevant tests once. Record new failures separately from the earlier 272-test result. The full suite includes a real IOKit test.
-3. Reuse the OMP install and activation path in isolated configuration and app-support roots. Resolve the helper from the actual bundle. Keep other families inactive in the first-version runtime without editing their real configuration.
-4. Add one app-owned startup and reconcile path. Recover installation operations, load persisted model state, validate activation and owners, reconcile events, then feed the aggregate decision into `AwakeController.update(decision:)`.
-5. Observe the inbox with recovery for missed notifications. Run periodic recovery only while OMP support is enabled. Keep checkpoint writes in the app.
-6. Exercise the production helper with synthetic OMP metadata in an isolated root. Verify start, finish, pause, and quit through the app and real IOKit readback.
+- Deleted the Pi, Codex, and OpenCode adapters; `HookAdapterRegistry` now contains OMP only.
+- Moved the six non-OMP integration packages out of `Resources/Integrations` into test-only fixtures; the app bundle ships `omp` only.
+- Deleted the removed adapters' test suites, reduced the catalog tests to one shipped family and target, and retargeted generic installer tests to fixture packages.
+- Added a shipped-OMP install/remove test and excluded fixture data from SwiftPM target resources.
 
-Exit: the isolated production path creates exactly one assertion on start, removes it on finish, and shows actual errors. Disabled OMP produces no contribution or observer. This proves app wiring, not real OMP delivery.
+Evidence: `swift test` 232 tests, 0 failures (including the real IOKit assertion test); `./build.sh`; `codesign --verify --strict AwakeLite.app`; the bundle contains only `Resources/Integrations/omp`.
+
+Exit: shipped code and resources contain only OMP; the generic installer keeps fixture-level format coverage until R4.
+
+## R1b. Connect one isolated OMP path
+
+Status: complete 2026-11-04 in the worktree. Covers the app-wiring parts of A01, A05, A07, A14, and A15.
+
+Implemented:
+
+- `Sources/AppCoordinator.swift` owns startup order: recover pending operations, load the checkpoint, retire foreign-boot owners, apply committed activation, reconcile the inbox, and deliver the aggregate decision to `AwakeController`.
+- The inbox is watched with a directory `DispatchSource`; a 30 s recovery pass runs only while OMP is active. Both stop when activation is absent or unreadable.
+- The catalog posts `.awakeLiteActivationChanged` after install, removal, or recovery; the coordinator re-reads receipts and journals instead of trusting UI state.
+- An unreadable checkpoint is never replaced with an empty model. An unreadable or unresolved install state fails closed, stops observation, and surfaces a diagnostic.
+- The app support root can be overridden with `AWAKE_LITE_APP_SUPPORT` for isolated smoke checks; the default remains `~/Library/Application Support/AwakeLite`.
+
+Exit evidence: with the app running against an isolated root and a committed OMP receipt at generation 1, the production helper wrote `agent_start` and `session_stop` events. The app held a real `PreventUserIdleSystemSleep` assertion named `AwakeLite: work in progress` on start, released it on finish, re-acquired the persisted working state after an app restart, and released it when the process exited. With an empty root the helper exited 3, wrote nothing, and no assertion appeared. `AppCoordinatorTests` covers disabled OMP (no observer), start/finish, human wait/resume, removal, reinstall generations, an unresolved journal, a corrupt checkpoint, and the real IOKit path including pause. The menu-bar pause/quit clicks were not exercised by GUI automation; their `PowerPolicy` path is test-covered.
 
 Owning areas: `AwakeController.swift`, `AwakeLiteApp.swift`, `PowerAssertion.swift`, `Core/`, `Integrations/Activation.swift`, and the smallest necessary app-side coordination code. Avoid a new transport, daemon, framework, installer rewrite, or broad UI redesign.
 
@@ -34,21 +47,24 @@ Record evidence in STATE before moving to R2. If existing tests or the build fai
 
 ## R2. Check real OMP delivery immediately
 
-Status: blocked on R1. Covers live OMP evidence for A04–A08 and A10, with selected A09 scenarios.
+Status: core live proof complete 2026-11-04 with OMP `18.16.0` in print mode on macOS 27.2.0 arm64; re-checked on `18.18.1` on 2026-11-08, including the Esc interrupt path. Retry, background work, parallel sessions, approval denial, and owner death remain unverified and move to R3.
 
-1. Record the installed OMP version, CLI mode, macOS version, and processor architecture. Verify the extension events and loading path against the installed version before setup.
-2. Prepare a reviewable OMP-only setup preview using the existing installer. Apply to real settings only within authorization for that setup. System installation and publication remain separate actions.
-3. Start a separate test session. Leave existing user tasks and sessions undisturbed.
-4. Check an open idle session, work start, normal completion, cancellation, failure, human wait and resume, continuation, retry, and observed background work. Read the actual assertion through IOKit or `pmset -g assertions`.
-5. Check pause and quit while a task is active. Inspect persisted metadata for privacy.
+Observed:
 
-Exit: one real OMP task proves start and finish through the whole app path, and each remaining scenario has an explicit result or blocker. `agent_end` alone is not completion for the main OMP run. Verify `session_stop`, background-work ordering, and whether approval events fire in the selected mode.
+- `agent_start`/`turn_start` created exactly one real assertion, held for the run, and `session_stop` released it.
+- An offline run wrote five events (session start, two starts, completion, shutdown); restarting the app reconciled them to a completed work record with no gap.
+- An open idle TUI session created no work and no assertion.
+- `--approval-mode always-ask` emitted `humanWait` and `resumed`.
+- Reinstall moved activation to generation 2 and dropped old-generation work; a further real run held and released the assertion.
+- No tested prompt text appeared in app storage.
 
-If OMP cannot supply the required lifecycle, stop expansion and describe the missing event or guarantee. Keep affected criteria unverified. Revise only the OMP adapter or its declared limitation; do not infer completion from silence or lower the shared safety rules. A basic live proof alone does not close R3 or mark the target fully accepted.
+Still unverified: automatic retry, background jobs, parallel sessions/subagents, approval denial, OMP process death mid-run, and the two-second latency target. A killed OMP probe left a working record until reinstall changed the generation, because no owner-death probe exists yet.
+
+If OMP cannot supply a required event or guarantee in a tested mode, describe the missing event rather than inferring completion from silence. Keep affected criteria unverified.
 
 ## R3. Close OMP reliability and first-version acceptance
 
-Status: blocked on the R2 live proof. Covers the remaining OMP criteria, especially A09–A13 and A16–A17.
+Status: next development unit. Covers the remaining OMP criteria, especially A06, A09–A13, and A16–A17, plus the scenarios not exercised in R2.
 
 - Check parallel OMP work, waiting parents with active children, duplicates, late completion, and generation changes.
 - Check app restart during work, missed notifications, helper failure, corrupt checkpoints, owner termination, and PID reuse. A supplied owner token has no measured start time; PID presence alone cannot validate its identity.
@@ -64,15 +80,14 @@ Exit: the OMP acceptance table in STATE records evidence for every applicable A0
 Status: blocked on OMP acceptance.
 
 1. Inspect the dependency path used by the accepted OMP version.
-2. Propose a bounded removal of unused UI and integration machinery. Preserve existing work before deletion. Do not remove receipt, generation, or recovery protections while retained code depends on them.
-3. Simplify OMP setup only if the current setup causes an observed problem. Manual instructions must explain how valid activation is established; bypassing the helper's activation check is not a simplification.
-4. Re-run the affected checks and the real OMP start/finish/pause scenario after removal.
-5. Use the app on ordinary tasks and record concrete defects in STATE.
+2. Replace the generic installer stack (`Manifest`, `Catalog`, `ConfigEditor`, `InstallPlan`, `Installer`, about 4.2k lines) and the catalog UI (about 1k lines) with an OMP-specific installer and a small menu setup, expected around 500 lines. Preserve receipt, generation, atomic-write, removal, and privacy behavior while retained code depends on them.
+3. Re-run the affected checks and the real OMP start/finish/pause scenario after replacement.
+4. Use the app on ordinary tasks and record concrete defects in STATE.
 
 Exit: README describes the version that was actually exercised, retained code serves its declared behavior, and no new family has been added. Choose a second target only after OMP acceptance and use, through a new scope decision. There is no arbitrary line-count target or promised completion date.
 
 ## Preserved earlier work
 
-Former Stages 1–3 produced the core, installer, catalog, helper, and Pi, OMP, Codex, and OpenCode adapters. Their historical evidence and review findings remain in STATE; detailed contracts remain in ARCHITECTURE. Partial former Stage 5.1 power code also exists in the worktree.
+The pre-cut implementation is commit `d6f1721` on branch `omp-only-minimal`. It contains the seven-family catalog, installer, helper, and the Pi, OMP, Codex, and OpenCode adapters. Test-only manifests under `Tests/AwakeLiteCoreTests/Fixtures/Integrations/` keep the generic installer's JSON, TOML, and copy coverage until R4 replaces it.
 
-The old Stage 4 work on Claude Code, Cursor, and Antigravity, broad desktop qualification, and publication preparation are deferred. References to old stage numbers in historical evidence are not instructions to resume that plan.
+References to former stages in the checkpoint's history are not instructions to resume that plan.

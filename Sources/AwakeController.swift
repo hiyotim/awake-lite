@@ -9,8 +9,14 @@ import SwiftUI
 final class AwakeController: ObservableObject {
     @Published private(set) var isPaused = false
 
-    /// The Stage 1 aggregate decision power is derived from. Nothing supplies
-    /// it yet (model wiring is Stage 5.3), so it starts as confirmed idle.
+    /// The last startup, activation, or reconcile error. It stays visible
+    /// until a later successful path clears it; it is never used as a claim
+    /// about work state.
+    @Published private(set) var diagnostic: String?
+
+    /// The aggregate decision power is derived from. `AppCoordinator` supplies
+    /// it after startup recovery and every inbox pass; the initial value is
+    /// replaced before observation starts.
     private(set) var decision = AggregateDecision(state: .idle, holdAssertion: false, reasons: [])
 
     /// The only assertion owner in the app.
@@ -68,6 +74,11 @@ final class AwakeController: ObservableObject {
         guard !isTerminating, paused != isPaused else { return }
         isPaused = paused
         power.update(decision: decision, paused: isPaused)
+    }
+
+    func setDiagnostic(_ text: String?) {
+        guard text != diagnostic else { return }
+        diagnostic = text
     }
 
     func quit() {

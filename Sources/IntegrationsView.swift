@@ -10,9 +10,14 @@ import SwiftUI
 /// процессы и не знает форматов конфигурации продуктов.
 @MainActor
 final class IntegrationsStore: ObservableObject {
-    /// Единственный корень, которым владеет приложение:
-    /// `~/Library/Application Support/AwakeLite`.
+    /// The app-owned root. The default is
+    /// `~/Library/Application Support/AwakeLite`; `AWAKE_LITE_APP_SUPPORT`
+    /// overrides it for isolated smoke checks.
     nonisolated static let defaultAppSupportRoot: URL = {
+        if let override = ProcessInfo.processInfo.environment["AWAKE_LITE_APP_SUPPORT"],
+           !override.isEmpty {
+            return URL(fileURLWithPath: override, isDirectory: true)
+        }
         let manager = FileManager.default
         let base = manager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? manager.homeDirectoryForCurrentUser
@@ -124,6 +129,7 @@ final class IntegrationsStore: ObservableObject {
         performRecovery()
         refreshReceipts()
         rebuildCards()
+        NotificationCenter.default.post(name: .awakeLiteActivationChanged, object: nil)
     }
 
     private func loadCatalog() {
@@ -354,19 +360,18 @@ final class IntegrationsStore: ObservableObject {
             } ?? "квитанция установки не записана"
             messages[family] = """
             Требуется восстановление: \(recorded), но операция не завершена. \
-            Источника событий нет, состояние работы не наблюдается. \
-            Подключение не подтверждено.
+            Семейство не активировано, наблюдение не запущено, состояние работы неизвестно.
             """
         } else if let receipt = receipts[family] {
             messages[family] = """
             Поддержка установлена на поколении активации \(receipt.activationGeneration). \
-            Адаптеры этапа 3 поставлены, но приложение ещё не подписано на события и не связано с моделью, \
-            поэтому наблюдение работы не подтверждено. Подключение не подтверждено.
+            Приложение загружает активацию и принимает события помощника; \
+            реальная доставка OMP подтверждается только живой задачей.
             """
         } else if let receiptError = receiptErrors[family] {
             messages[family] = "Квитанция установки не читается, состояние работы неизвестно: \(receiptError)"
         } else {
-            messages[family] = "Поддержка не установлена. Источника событий нет, подключение не подтверждено."
+            messages[family] = "Поддержка не установлена. Источника событий нет, наблюдение не запущено."
         }
         rebuildCards()
     }
@@ -379,6 +384,7 @@ final class IntegrationsStore: ObservableObject {
             busyFamilies.remove(family)
             refreshReceipts()
             rebuildCards()
+            NotificationCenter.default.post(name: .awakeLiteActivationChanged, object: nil)
         }
         guard let installer else {
             errors[family] = "Каталог интеграций не загружен."
@@ -390,8 +396,7 @@ final class IntegrationsStore: ObservableObject {
             messages[family] = """
             Установлено. Поколение активации \(receipt.activationGeneration); \
             записей под контролем AwakeLite: \(receipt.entries.count). \
-            Для Pi, OMP и Codex установленные записи вызывают помощника AwakeLite; \
-            для Codex требуется подтвердить доверие к хукам в /hooks.
+            Установленная запись вызывает помощника AwakeLite; приложение принимает его события.
             """
         } catch {
             errors[family] = Self.describe(error)
@@ -403,6 +408,7 @@ final class IntegrationsStore: ObservableObject {
             busyFamilies.remove(family)
             refreshReceipts()
             rebuildCards()
+            NotificationCenter.default.post(name: .awakeLiteActivationChanged, object: nil)
         }
         guard let installer else {
             errors[family] = "Каталог интеграций не загружен."

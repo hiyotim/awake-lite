@@ -27,7 +27,7 @@ final class InstallerTests: XCTestCase {
                 attributes: [.posixPermissions: 0o700]
             )
         }
-        catalog = try IntegrationFixtures.bundledCatalog()
+        catalog = try IntegrationFixtures.fixtureCatalog()
         installer = Installer(catalog: catalog)
     }
 
@@ -85,6 +85,32 @@ final class InstallerTests: XCTestCase {
                 FileManager.default.fileExists(atPath: support.appendingPathComponent("receipts/\(family).json").path)
             )
         }
+    }
+
+    func testShippedOMPManifestInstallsAndRemoves() throws {
+        let shipped = Installer(catalog: try IntegrationFixtures.shippedCatalog())
+        let preview = try shipped.preview(
+            family: "omp",
+            configRoot: home,
+            appSupportRoot: support,
+            discovery: discovery()
+        )
+        XCTAssertTrue(preview.conflicts.isEmpty, "\(preview.conflicts)")
+        let receipt = try shipped.apply(preview)
+        XCTAssertEqual(receipt.activationGeneration, 1)
+
+        let path = try XCTUnwrap(receipt.entries.first?.path)
+        XCTAssertEqual(
+            path,
+            home.appendingPathComponent(".omp/agent/extensions/awake-lite/index.js").path
+        )
+        let text = try String(contentsOfFile: path, encoding: .utf8)
+        XCTAssertFalse(Template.containsPlaceholder(text))
+        XCTAssertTrue(text.contains(IntegrationPaths.helperPath))
+
+        _ = try shipped.remove(family: "omp", appSupportRoot: support)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: receiptURL("omp").path))
     }
 
     func testPreviewWritesNothing() throws {
@@ -793,7 +819,7 @@ final class InstallerTests: XCTestCase {
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         for name in IntegrationFixtures.families {
             try FileManager.default.copyItem(
-                at: IntegrationFixtures.integrationsRoot.appendingPathComponent(name, isDirectory: true),
+                at: IntegrationFixtures.fixtureIntegrationsRoot.appendingPathComponent(name, isDirectory: true),
                 to: root.appendingPathComponent(name, isDirectory: true)
             )
         }

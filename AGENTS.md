@@ -2,9 +2,9 @@
 
 ## Current task and scope
 
-The user selected OMP CLI (`omp.cli`) for the first working version on 2026-11-02. Follow the recovery units R0–R4 in [ROADMAP.md](ROADMAP.md). The former Stage 4 expansion is deferred. Existing adapters and bundled packages do not expand the active scope.
+The user selected OMP CLI (`omp.cli`) for the first working version on 2026-11-02. Follow the recovery units in [ROADMAP.md](ROADMAP.md). The shipped surface was cut to OMP on 2026-11-04; the pre-cut multi-family work is commit `d6f1721` on branch `omp-only-minimal`. Other adapters and packages do not expand the active scope.
 
-The current assignment is documentation cleanup and a development plan. Do not treat this assignment as a request to implement or launch the app. Implementation was previously approved; when asked to continue development, start with R1 without repeating that approval request. Commits, pushes, publication, release uploads, and system installs require explicit authorization for those actions.
+Implementation was previously approved. The R1a surface cut, R1b app wiring, and the R2 core live proof are complete; when asked to continue development, start with R3 (reliability and remaining OMP scenarios) without repeating that approval request. Commits, pushes, publication, release uploads, and system installs require explicit authorization for those actions.
 
 ## Read in this order
 
@@ -14,7 +14,7 @@ The current assignment is documentation cleanup and a development plan. Do not t
 4. Select the next incomplete recovery unit in [ROADMAP.md](ROADMAP.md).
 5. Read only the owning contracts in [ARCHITECTURE.md](ARCHITECTURE.md) and the relevant source files.
 
-README is the entry point. SPEC owns requirements. ARCHITECTURE owns contracts. ROADMAP owns work order. STATE owns progress and evidence. [HARNESS_RESEARCH.md](HARNESS_RESEARCH.md) is a dated source survey, not live acceptance or a task list.
+README is the entry point. SPEC owns requirements. ARCHITECTURE owns contracts. ROADMAP owns work order. STATE owns progress and evidence.
 
 ## Actual implementation
 
@@ -22,27 +22,27 @@ The current source is an incomplete migration. `Sources/ProcessScanner.swift` is
 
 | Responsibility | Owning files | State |
 | --- | --- | --- |
-| Menu, pause, quit, login item | `Sources/AwakeLiteApp.swift`, `AwakeController.swift`, `LoginItem.swift` | Exists; model input is disconnected |
-| Power assertion | `Sources/PowerAssertion.swift` | Exists; current native behavior is unverified |
-| Activity and persistence | `Sources/Core/Activity.swift`, `LocalEventStore.swift` | Exists; earlier fixture evidence is in STATE |
-| OMP extension and mapping | `Resources/Integrations/omp/`, `Sources/Adapters/OMPAdapter.swift` | Exists; no live OMP acceptance |
-| Helper and normalization | `Helper/main.swift`, `Sources/Adapters/HelperRunner.swift`, `OwnerIdentity.swift`, `Sources/HookNormalizer.swift` | Exists; emits lifecycle metadata |
-| Installation and activation | `Sources/Integrations/` | Exists; startup handoff is not connected |
-| Catalog UI | `Sources/IntegrationsView.swift` | Exists; broad catalog work is deferred |
-| Other adapters | `Sources/Adapters/PiAdapter.swift`, `CodexAdapter.swift`, `OpenCodeAdapter.swift` | Preserved; outside the first version |
-| Behavioral checks | `Tests/AwakeLiteCoreTests/` | Includes fixtures and a real IOKit test |
+| Menu, pause, quit, login item | `Sources/AwakeLiteApp.swift`, `AwakeController.swift`, `LoginItem.swift` | Exists; power path wired, GUI pause/quit not exercised |
+| Power assertion | `Sources/PowerAssertion.swift` | Exists; real IOKit proof through the coordinator and app |
+| Activity and persistence | `Sources/Core/Activity.swift`, `LocalEventStore.swift` | Exists; app-owned reconcile and checkpoint |
+| Startup and observation | `Sources/AppCoordinator.swift` | Exists; real print-mode OMP path proven |
+| OMP extension and mapping | `Resources/Integrations/omp/`, `Sources/Adapters/OMPAdapter.swift` | Real print-mode delivery; retry/background untested |
+| Helper and normalization | `Helper/main.swift`, `Sources/Adapters/HelperRunner.swift`, `OwnerIdentity.swift`, `Sources/HookNormalizer.swift` | Exists; registry ships OMP only |
+| Installation and activation | `Sources/Integrations/` | Live install at generation 2; first live proof complete |
+| Catalog UI | `Sources/IntegrationsView.swift` | Exists; lists the one shipped OMP card |
+| Behavioral checks | `Tests/AwakeLiteCoreTests/` | 243 tests; includes fixtures, coordinator, and a real IOKit test |
 
-The observer scheduler and the app-owned startup/reconcile path are missing. Do not create empty modules to match an ownership table.
+The app-owned startup/reconcile path now exists; the next proof is real OMP delivery, not more infrastructure. Do not create empty modules to match an ownership table.
 
 ## Keep development bounded
 
 - Work on one recovery unit at a time. End it with the observable result and evidence defined in ROADMAP.
 - Reuse the existing OMP extension, helper, model, and power boundary. Establish a working path before replacing infrastructure.
 - Do not add adapters, desktop support, a new installer, a daemon, a second event transport, or a generic plugin framework before OMP live acceptance.
-- Keep other families inactive in the first-version runtime. Preserve their files and installed configuration until a separately scoped change addresses them.
+- Do not restore a removed family without a new explicit scope decision after OMP acceptance. Test-only manifests under `Tests/AwakeLiteCoreTests/Fixtures/` are installer fixtures, not shipped support.
 - Do not restore process presence or a silence timeout as activity evidence.
 - Stop at a missing OMP lifecycle contract. Report the exact limitation instead of compensating with speculative infrastructure.
-- After OMP acceptance, inspect dependencies and remove unused parts in a bounded change. A smaller line count alone is not an acceptance criterion.
+- After OMP acceptance, replace the generic installer and catalog UI in one bounded change. A smaller line count alone is not an acceptance criterion.
 
 ## Preserve contracts
 

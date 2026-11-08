@@ -415,14 +415,11 @@ struct HookNormalizer {
 /// The single place that maps a family to its adapter.
 ///
 /// Vendor event names and payload shapes stay in the adapter files; nothing in
-/// the shared core knows them. One entry per install family: Codex serves both
-/// `codex.cli` and `codex.desktop` from one adapter (it reads the target from
-/// the invocation), so it must not appear twice. Add a new family only here.
+/// the shared core knows them. OMP is the only shipped family; a new family
+/// requires an explicit scope decision and one entry here.
 enum HookAdapterRegistry {
     static let all: [HookAdapter] = [
-        PiAdapter(),
-        OMPAdapter(),
-        CodexAdapter()
+        OMPAdapter()
     ]
 
     static func adapter(for family: String, in adapters: [HookAdapter] = all) -> HookAdapter? {

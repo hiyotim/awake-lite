@@ -79,6 +79,22 @@ struct ActivationHandoff {
             return ActivationState(active: [], inactive: [], unresolved: [])
         }
 
+        // The app-support root is shared with the event store, so its mere
+        // existence does not mean an installation was ever attempted. A root
+        // with none of the installer-owned directories is fresh. Once any of
+        // them exists, a missing journal or receipt directory is unreadable
+        // state and fails closed below.
+        let fileManager = FileManager.default
+        let installDirectories = [storage.packages, storage.receipts, storage.journal]
+        let hasInstallState = installDirectories.contains { directory in
+            var isDirectory = ObjCBool(false)
+            return fileManager.fileExists(atPath: directory.path, isDirectory: &isDirectory)
+                && isDirectory.boolValue
+        }
+        guard hasInstallState else {
+            return ActivationState(active: [], inactive: [], unresolved: [])
+        }
+
         var unresolved: [UnresolvedOperation] = []
         for journal in try storage.loadJournals() where journal.stage.isUnresolved {
             unresolved.append(

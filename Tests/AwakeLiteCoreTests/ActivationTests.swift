@@ -27,7 +27,7 @@ final class ActivationTests: XCTestCase {
                 attributes: [.posixPermissions: 0o700]
             )
         }
-        catalog = try IntegrationFixtures.bundledCatalog()
+        catalog = try IntegrationFixtures.fixtureCatalog()
         installer = Installer(catalog: catalog)
     }
 

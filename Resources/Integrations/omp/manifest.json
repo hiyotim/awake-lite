@@ -6,9 +6,9 @@
   "requiresRestart": true,
   "requiresHookTrust": false,
   "notes": [
-    "CLI target is fixture-level, not live: no live OMP run was performed. Adapter fixtures cover the documented extension event shapes.",
+    "Real print-mode start/finish and approval events were observed; interactive Esc maps to a terminal agent_end and settles the run.",
     "Extension source follows the documented default factory, event names, and ~/.omp/agent/extensions/<name>/index.js discovery.",
-    "agent_end is notification-only; session_stop is the main-session completion boundary and defers until agent-owned background work is idle.",
+    "agent_end with no continuation or background flag completes the run; session_stop remains the awaited pre-settle completion and is idempotent.",
     "Auto-retry, continuation queues, and subagent identity are mapped from documented events; delivery order is unverified."
   ],
   "targets": [

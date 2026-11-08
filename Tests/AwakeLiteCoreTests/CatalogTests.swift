@@ -4,35 +4,24 @@ import XCTest
 
 /// Unit 2.1: manifest schema 1, loader, catalog, discovery.
 final class CatalogTests: XCTestCase {
-    /// The single source of truth for shipped verification levels.
+    /// The single source of truth for the shipped verification levels.
     ///
     /// A level is declared data (ARCHITECTURE, "Package manifest"): it is raised
     /// only by an adapter fixture or a recorded live check, never by discovery
-    /// and never by the presence of an installed product. Four targets have
-    /// adapter fixtures after Stage 3 (units 3.2–3.4); the remaining six,
-    /// including both desktop-only and not-yet-adapter families, stay
-    /// `unverified` because no fixture or live check exists for them.
+    /// and never by the presence of an installed product. OMP is the only
+    /// shipped target and carries fixture-level evidence.
     static let expectedVerificationLevels: [String: VerificationLevel] = [
-        "antigravity.cli": .unverified,
-        "antigravity.desktop": .unverified,
-        "claude-code.cli": .unverified,
-        "claude-code.desktop": .unverified,
-        "codex.cli": .fixture,
-        "codex.desktop": .unverified,
-        "cursor.desktop": .unverified,
-        "omp.cli": .fixture,
-        "opencode.tui": .fixture,
-        "pi.cli": .fixture
+        "omp.cli": .fixture
     ]
 
-    // MARK: - Bundled catalog
+    // MARK: - Shipped catalog
 
-    func testBundledCatalogDecodesAllSevenFamilies() throws {
-        let catalog = try IntegrationFixtures.bundledCatalog()
+    func testShippedCatalogDecodesOnlyOMP() throws {
+        let catalog = try IntegrationFixtures.shippedCatalog()
 
-        XCTAssertEqual(catalog.familyNames, IntegrationFixtures.families)
-        XCTAssertEqual(catalog.allManifests.count, 7)
-        for family in IntegrationFixtures.families {
+        XCTAssertEqual(catalog.familyNames, IntegrationFixtures.shippedFamilies)
+        XCTAssertEqual(catalog.allManifests.count, 1)
+        for family in IntegrationFixtures.shippedFamilies {
             let manifest = try catalog.manifest(for: family)
             XCTAssertEqual(manifest.schema, 1)
             XCTAssertEqual(manifest.family, family, "family must match its directory")
@@ -58,56 +47,46 @@ final class CatalogTests: XCTestCase {
         }
     }
 
-    func testCatalogDeclaresExactlyTheTenCompatibilityTargets() throws {
-        let catalog = try IntegrationFixtures.bundledCatalog()
-        XCTAssertEqual(catalog.compatibilityTargetIDs, IntegrationFixtures.targetIDs.sorted())
-        XCTAssertEqual(catalog.compatibilityTargets.count, 10)
+    func testShippedCatalogDeclaresOnlyTheOMPCLITarget() throws {
+        let catalog = try IntegrationFixtures.shippedCatalog()
+        XCTAssertEqual(catalog.compatibilityTargetIDs, IntegrationFixtures.shippedTargetIDs.sorted())
+        XCTAssertEqual(catalog.compatibilityTargets.count, 1)
 
         let modes = Dictionary(
             uniqueKeysWithValues: catalog.compatibilityTargets.map { ($0.id, $0.mode) }
         )
-        XCTAssertEqual(modes["claude-code.cli"], .cli)
-        XCTAssertEqual(modes["claude-code.desktop"], .desktop)
-        XCTAssertEqual(modes["codex.cli"], .cli)
-        XCTAssertEqual(modes["codex.desktop"], .desktop)
-        XCTAssertEqual(modes["cursor.desktop"], .desktop)
-        XCTAssertEqual(modes["antigravity.cli"], .cli)
-        XCTAssertEqual(modes["antigravity.desktop"], .desktop)
-        XCTAssertEqual(modes["pi.cli"], .cli)
         XCTAssertEqual(modes["omp.cli"], .cli)
-        XCTAssertEqual(modes["opencode.tui"], .cli)
     }
 
     /// The declared matrix is data, so the whole table is asserted at once: a
     /// level that moves without an accompanying fixture or live check, and a
     /// new target that appears without a recorded level, both fail here.
-    func testBundledTargetsDeclareTheRecordedVerificationLevels() throws {
-        let catalog = try IntegrationFixtures.bundledCatalog()
+    func testShippedTargetsDeclareTheRecordedVerificationLevels() throws {
+        let catalog = try IntegrationFixtures.shippedCatalog()
         let declared = Dictionary(
             uniqueKeysWithValues: catalog.compatibilityTargets.map { ($0.id, $0.verificationLevel) }
         )
 
         XCTAssertEqual(Set(declared.keys), Set(Self.expectedVerificationLevels.keys))
         XCTAssertEqual(declared, Self.expectedVerificationLevels)
-        XCTAssertEqual(declared.values.filter { $0 == .fixture }.count, 4, "pi, omp, opencode, and codex.cli have fixtures")
+        XCTAssertEqual(declared.values.filter { $0 == .fixture }.count, 1, "only OMP has a fixture")
         XCTAssertFalse(declared.values.contains(.live), "no target has a recorded live acceptance yet")
-        XCTAssertEqual(declared["codex.desktop"], .unverified, "desktop delivery is unproven")
     }
 
     func testCatalogExposesRestartAndTrustFlags() throws {
-        let catalog = try IntegrationFixtures.bundledCatalog()
-        XCTAssertTrue(try catalog.manifest(for: "codex").requiresRestart)
-        XCTAssertTrue(try catalog.manifest(for: "codex").requiresHookTrust)
-        XCTAssertFalse(try catalog.manifest(for: "claude-code").requiresHookTrust)
-        XCTAssertFalse(try catalog.manifest(for: "claude-code").notes.isEmpty)
+        let catalog = try IntegrationFixtures.shippedCatalog()
+        XCTAssertTrue(try catalog.manifest(for: "omp").requiresRestart)
+        XCTAssertFalse(try catalog.manifest(for: "omp").requiresHookTrust)
+        XCTAssertFalse(try catalog.manifest(for: "omp").notes.isEmpty)
     }
 
     // MARK: - Discovery
 
-    /// Discovery reads files only. The family used here has one `fixture` target
-    /// and one `unverified` target, so the check compares discovered status
-    /// against the manifest value instead of a blanket expectation: appearing on
-    /// disk neither raises nor lowers a declared level.
+    /// Discovery reads files only. The fixture family used here has one
+    /// `fixture` target and one `unverified` target, so the check compares
+    /// discovered status against the manifest value instead of a blanket
+    /// expectation: appearing on disk neither raises nor lowers a declared
+    /// level.
     func testDiscoveryReportsAvailabilityWithoutRaisingVerification() throws {
         let sandbox = try IntegrationFixtures.makeSandbox()
         defer { try? FileManager.default.removeItem(at: sandbox) }
@@ -116,7 +95,7 @@ final class CatalogTests: XCTestCase {
         try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: applications, withIntermediateDirectories: true)
 
-        let catalog = try IntegrationFixtures.bundledCatalog()
+        let catalog = try IntegrationFixtures.fixtureCatalog()
         let discovery = ProductDiscovery(homeRoot: home, applicationRoots: [applications])
         let declared = Dictionary(
             uniqueKeysWithValues: try catalog.manifest(for: "codex").targets.map { ($0.id, $0.verificationLevel) }
@@ -175,18 +154,19 @@ final class CatalogTests: XCTestCase {
             withIntermediateDirectories: true
         )
 
-        let catalog = try IntegrationFixtures.bundledCatalog()
+        let catalog = try IntegrationFixtures.fixtureCatalog()
         let discovery = ProductDiscovery(homeRoot: home, applicationRoots: [applications])
         let statuses = try catalog.targetStatuses(for: "codex", discovery: discovery)
         XCTAssertTrue(statuses.allSatisfy { !$0.isAvailable })
         // An unusable candidate is absence; it never edits the declared level.
         for status in statuses {
-            XCTAssertEqual(status.verificationLevel, Self.expectedVerificationLevels[status.id])
+            let expected: VerificationLevel = status.id == "codex.cli" ? .fixture : .unverified
+            XCTAssertEqual(status.verificationLevel, expected)
         }
     }
 
-    func testDiscoveryHasDocumentedCandidatesForEveryTarget() throws {
-        let catalog = try IntegrationFixtures.bundledCatalog()
+    func testDiscoveryHasDocumentedCandidatesForEveryShippedTarget() throws {
+        let catalog = try IntegrationFixtures.shippedCatalog()
         for id in catalog.compatibilityTargetIDs {
             XCTAssertFalse(
                 (ProductDiscovery.candidates[id] ?? []).isEmpty,

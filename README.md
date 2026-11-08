@@ -4,11 +4,11 @@ AwakeLite is a native macOS menu-bar utility intended to prevent automatic syste
 
 ## Current state
 
-The source is an incomplete migration, not a verified keep-awake app. The old process scanner has been removed in the worktree. The new controller starts idle, and no app caller feeds agent activity into it. `PowerPolicy` exists, but the app does not connect event ingestion, model reconciliation, and power decisions.
+The app is wired: `AppCoordinator` recovers pending install operations, loads the model checkpoint, applies committed activation, watches the inbox, reconciles events, and feeds the aggregate decision into `AwakeController` and the single IOKit assertion. An app restart re-acquires persisted working state; disabled or unreadable OMP activation starts no observer.
 
-OMP's extension, helper, activity model, event store, installer, and power boundary already exist. The next development task is to connect those components, prove the path in isolated roots, and then check real OMP delivery. No target has live acceptance. Current source inspection does not establish the behavior of an older generated or installed bundle.
+A real OMP `18.16.0` print-mode session has now exercised the whole path: work start held a real assertion, completion released it, and an idle session held nothing. Retry, background jobs, parallel sessions, approval denial, owner death, and full acceptance remain unverified. The test extension is installed at `~/.omp/agent/extensions/awake-lite/index.js` at activation generation 2 and points at this repository's `AwakeLite.app`; moving the repository breaks that installed path until reinstall.
 
-The repository still contains seven integration families and ten manifest targets from the earlier plan. Their presence is not a compatibility promise. Other families and catalog expansion are deferred; documentation cleanup has not removed their code or changed installed support.
+OMP is the only shipped integration family and `omp.cli` the only shipped target. Pi, Codex, OpenCode, Claude Code, Cursor, and Antigravity adapters and resources were removed from the shipped surface on 2026-11-04. Their manifests survive only as test-only installer fixtures; no adapter, catalog entry, or app code loads them. The checkpoint branch `omp-only-minimal` preserves the pre-cut work.
 
 ## Continue development
 
@@ -21,9 +21,8 @@ Read these documents in order:
 | [ROADMAP.md](ROADMAP.md) | What is the next bounded task and its exit check? |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Which existing component owns the behavior? |
 | [AGENTS.md](AGENTS.md) | How must a coding agent work in this repository? |
-| [HARNESS_RESEARCH.md](HARNESS_RESEARCH.md) | What did the earlier source survey report? |
 
-Start with ROADMAP R1. Get one OMP path working before adding integrations or replacing infrastructure. Preserve current uncommitted work before resets, deletion, or branch changes.
+Start with ROADMAP R2: check real OMP delivery. The OMP-only cut and app wiring are done. Preserve current uncommitted work before resets, deletion, or branch changes.
 
 ## Build and checks
 
@@ -37,15 +36,15 @@ swift test
 codesign --verify --strict AwakeLite.app
 ```
 
-`swift test` includes `PowerAssertion.swift`, the core, integrations, adapters, normalizer, and the helper target. The app entry point, controller, login item, and catalog UI compile through `build.sh`. The full test suite contains a real IOKit assertion test and is not entirely fixture-only. A skipped IOKit test does not establish native behavior.
+`swift test` includes `PowerAssertion.swift`, the core, integrations, the OMP adapter, the normalizer, and the helper target. The app entry point, controller, login item, and catalog UI compile through `build.sh`. The suite contains a real IOKit assertion test and is not entirely fixture-only. A skipped IOKit test does not establish native behavior.
 
-`build.sh` recreates the local generated `AwakeLite.app`, builds the helper into `Contents/MacOS/AwakeLiteHelper`, copies bundled integration resources, and signs the helper before the app. A successful build does not establish OMP event delivery or correct sleep behavior. Documentation-only changes require no build or app launch.
+`build.sh` recreates the local generated `AwakeLite.app`, builds the helper into `Contents/MacOS/AwakeLiteHelper`, copies the OMP integration package, and signs the helper before the app. A successful build does not establish OMP event delivery or correct sleep behavior. Documentation-only changes require no build or app launch.
 
 For an authorized runtime check, launch the local bundle with `open AwakeLite.app`. Building and launching do not install it into `/Applications` or configure OMP. Prepare OMP setup separately through the existing preview and receipt path. The catalog store resolves the helper from the current app bundle and refuses setup when resolution fails; path escaping still needs verification for the chosen location.
 
 ## Evidence and limits
 
-The last recorded full run on 2026-11-01 had 272 tests passing. The current source declares 294 test methods, including 12 power-policy and 10 helper-path methods added afterward. This is a source count, not a new passing run. Historical build, fixture, helper-smoke, and compatibility evidence is in STATE.
+On 2026-11-04 the cut, app wiring, and a real OMP print-mode run were verified: `swift build` and `swift test` (243 tests, 0 failures, including the real IOKit acquisition test), `./build.sh`, and `codesign --verify --strict AwakeLite.app`; the bundle contains only `Resources/Integrations/omp`. With OMP `18.16.0`, a real task acquired `PreventUserIdleSystemSleep` and released it on completion; an idle TUI session held nothing; approval checks emitted human-wait/resume; an offline run was reconciled after restart. Historical multi-family evidence remains in git (`omp-only-minimal` checkpoint) and is summarized in STATE.
 
 The original process-based version had 176 Swift lines and watched opencode, omp, and codex. It treated an open process as activity and could not distinguish work from waiting. Historical scanner checks do not validate the current event-based app.
 

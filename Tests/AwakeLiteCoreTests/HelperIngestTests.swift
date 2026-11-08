@@ -304,18 +304,15 @@ final class HelperIngestTests: XCTestCase {
         XCTAssertTrue(HelperFixtures.eventFiles(in: support).isEmpty)
     }
 
-    func testRegistryExposesTheBundledFamiliesOnceEach() throws {
+    func testRegistryExposesOnlyTheShippedFamily() throws {
         let families = HookAdapterRegistry.all.map(\.family)
 
-        XCTAssertEqual(families.sorted(), ["codex", "omp", "pi"])
+        XCTAssertEqual(families, ["omp"])
         XCTAssertEqual(Set(families).count, families.count, "one adapter per family")
-        for family in families {
-            XCTAssertNotNil(HookAdapterRegistry.adapter(for: family))
-        }
-        // Codex serves codex.cli and codex.desktop from one adapter, so a second
-        // codex entry would be unreachable through the lookup.
-        XCTAssertEqual(HookAdapterRegistry.adapter(for: "codex")?.family, "codex")
+        XCTAssertNotNil(HookAdapterRegistry.adapter(for: "omp"))
         // A canonical family without an adapter is still refused.
+        XCTAssertNil(HookAdapterRegistry.adapter(for: "pi"))
+        XCTAssertNil(HookAdapterRegistry.adapter(for: "codex"))
         XCTAssertNil(HookAdapterRegistry.adapter(for: "cursor"))
     }
 
@@ -336,13 +333,10 @@ final class HelperIngestTests: XCTestCase {
         XCTAssertTrue(HelperFixtures.eventFiles(in: support).isEmpty)
     }
 
-    func testRegisteredFamiliesIngestAndUnactivatedGenerationsWriteNothing() throws {
+    func testRegisteredFamilyIngestsAndUnactivatedGenerationsWriteNothing() throws {
         let cases: [(family: String, target: String, event: String, payload: [String: Any], work: String)] = [
-            ("pi", "pi.cli", "agent_start", ["session": "smoke", "workGeneration": 1], "run"),
             ("omp", "omp.cli", "agent_start",
-             ["session": "smoke", "workGeneration": 1, "agentKind": "main"], "run"),
-            ("codex", "codex.cli", "UserPromptSubmit",
-             ["session_id": "smoke", "turn_id": "t1", "hook_event_name": "UserPromptSubmit"], "turn-t1")
+             ["session": "smoke", "workGeneration": 1, "agentKind": "main"], "run")
         ]
 
         for item in cases {
@@ -738,16 +732,16 @@ final class HelperIngestTests: XCTestCase {
     }
 
     func testDetachedHelperKeepsTheSuppliedOwnerAfterItsParentExits() throws {
-        try HelperFixtures.activate(family: "pi", root: support)
+        try HelperFixtures.activate(family: "omp", root: support)
         let helper = try helperBinary()
         let instance = "p424242-0a1b2c3d"
         let payloadFile = sandbox.appendingPathComponent("payload.json")
-        try HelperFixtures.payload(["session": "smoke", "workGeneration": 9])
+        try HelperFixtures.payload(["session": "smoke", "workGeneration": 9, "agentKind": "main"])
             .write(to: payloadFile)
 
         // The shell exits immediately, so the helper cannot be measured through
         // its parent: a probe would name launchd or a later unrelated process.
-        let script = "\"\(helper.path)\" --family pi --target pi.cli --generation 1 "
+        let script = "\"\(helper.path)\" --family omp --target omp.cli --generation 1 "
             + "--event agent_start --app-support \"\(support.path)\" "
             + "--owner-instance \"\(instance)\" --owner-pid 424242 "
             + "< \"\(payloadFile.path)\" & exit 0"

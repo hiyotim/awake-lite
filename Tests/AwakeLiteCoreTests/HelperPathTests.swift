@@ -36,7 +36,7 @@ final class HelperPathTests: XCTestCase {
                 attributes: [.posixPermissions: 0o700]
             )
         }
-        catalog = try IntegrationFixtures.bundledCatalog()
+        catalog = try IntegrationFixtures.fixtureCatalog()
     }
 
     override func tearDownWithError() throws {
@@ -97,7 +97,10 @@ final class HelperPathTests: XCTestCase {
             codexText.contains("command = \"\\\"" + injectedHelperPath + "\\\" --family codex"),
             "the codex handler quotes the injected helper"
         )
-        for event in CodexAdapter.documentedEvents {
+        for event in [
+            "UserPromptSubmit", "PermissionRequest", "PostToolUse", "Stop",
+            "Interrupt", "SubagentStart", "SubagentStop"
+        ] {
             XCTAssertTrue(
                 codexText.contains("--event \(event)"),
                 "missing rendered handler for \(event)"
@@ -105,7 +108,7 @@ final class HelperPathTests: XCTestCase {
         }
         XCTAssertFalse(Template.containsPlaceholder(codexText), "codex block keeps no placeholder")
 
-        for family in ["pi", "omp", "opencode"] {
+        for family in ["pi", "opencode"] {
             let receipt = try install(family, installer: installer)
             let path = try XCTUnwrap(receipt.entries.first?.path)
             let text = try read(path)

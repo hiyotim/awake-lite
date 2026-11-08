@@ -19,7 +19,7 @@ let package = Package(
                 // build.sh, not by the library target.
                 "IntegrationsView.swift"
             ],
-            sources: ["Core", "Integrations", "Adapters", "HookNormalizer.swift", "PowerAssertion.swift"]
+            sources: ["Core", "Integrations", "Adapters", "HookNormalizer.swift", "PowerAssertion.swift", "AppCoordinator.swift"]
         ),
         // The short-lived hook helper. It links the same library so the event
         // schema, the store, and the activation check have one implementation.
@@ -31,7 +31,10 @@ let package = Package(
         .testTarget(
             name: "AwakeLiteCoreTests",
             dependencies: ["AwakeLiteCore"],
-            path: "Tests/AwakeLiteCoreTests"
+            path: "Tests/AwakeLiteCoreTests",
+            // Installer-format fixtures are read from disk through #filePath,
+            // not bundled as target resources.
+            exclude: ["Fixtures"]
         )
     ]
 )

@@ -1,6 +1,6 @@
 # AwakeLite specification
 
-Status: first-version scope reset on 2026-11-02. The user selected OMP CLI. Implementation remains incomplete; [STATE.md](STATE.md) records evidence.
+Status: first-version scope reset on 2026-11-02; the app-owned startup and observation path landed on 2026-11-04. A real OMP `18.16.0` print-mode start/finish run is verified. Retry, background work, parallel sessions, owner death, latency, and full acceptance remain unverified; [STATE.md](STATE.md) records evidence.
 
 ## Purpose
 
@@ -14,9 +14,9 @@ The only active compatibility target is `omp.cli`. Record the tested OMP version
 
 Reuse the existing OMP extension, native helper, activity model, event store, and power boundary. Use the existing installer only for OMP setup, with isolated-root verification before real configuration changes. The existing catalog is not a prerequisite for acceptance and receives no new features in this version.
 
-Pi, Codex, OpenCode, Claude Code, Cursor, and Antigravity support is deferred. Existing files and historical evidence remain in the repository. Seven bundled families and ten manifest targets describe the existing inventory, not a first-release promise. Keep non-OMP families outside the first-version runtime contribution.
+Pi, Codex, OpenCode, Claude Code, Cursor, and Antigravity support is deferred. Their adapters and shipped resources were removed on 2026-11-04; the pre-cut work is preserved on the `omp-only-minimal` checkpoint branch. Their manifests remain only as test fixtures for the generic installer. OMP is the only shipped family and target.
 
-Defer a redesigned catalog, universal installation improvements, online packages, additional transports, and publication work. Do not delete unrelated work or installed support as part of documentation cleanup.
+Defer a redesigned catalog, universal installation improvements, online packages, additional transports, and publication work. Do not restore another family without a new explicit scope decision after OMP acceptance.
 
 ## User behavior
 
@@ -53,7 +53,7 @@ The assertion prevents automatic idle system sleep and permits display sleep. Cl
 
 ## Acceptance criteria
 
-The existing IDs remain stable. Apply them to OMP CLI for the first version; older multi-target evidence stays in STATE.
+The existing IDs remain stable. Apply them to OMP CLI for the first version; older multi-family evidence remains in git history.
 
 | ID | Observable behavior |
 | --- | --- |

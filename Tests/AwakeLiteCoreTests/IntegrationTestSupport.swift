@@ -12,24 +12,39 @@ enum IntegrationFixtures {
             .deletingLastPathComponent()
     }
 
-    static var integrationsRoot: URL {
+    /// The integration packages the app ships: OMP only after the first-version
+    /// reset. `CatalogTests` asserts this surface explicitly.
+    static var shippedIntegrationsRoot: URL {
         repositoryRoot.appendingPathComponent("Resources/Integrations", isDirectory: true)
     }
 
-    static func bundledCatalog() throws -> Catalog {
-        try Catalog(loading: integrationsRoot)
+    /// Test-only packages. They keep the generic installer's format coverage
+    /// (JSON, TOML, copy) alive until R4 replaces it with an OMP-specific
+    /// installer. Nothing here ships or is loaded by the app.
+    static var fixtureIntegrationsRoot: URL {
+        repositoryRoot.appendingPathComponent(
+            "Tests/AwakeLiteCoreTests/Fixtures/Integrations",
+            isDirectory: true
+        )
     }
 
-    static let families = [
-        "antigravity", "claude-code", "codex", "cursor", "omp", "opencode", "pi"
-    ]
+    static func shippedCatalog() throws -> Catalog {
+        try Catalog(loading: shippedIntegrationsRoot)
+    }
 
-    static let targetIDs = [
-        "claude-code.cli", "claude-code.desktop",
-        "codex.cli", "codex.desktop",
-        "cursor.desktop",
-        "antigravity.cli", "antigravity.desktop",
-        "pi.cli", "omp.cli", "opencode.tui"
+    static func fixtureCatalog() throws -> Catalog {
+        try Catalog(loading: fixtureIntegrationsRoot)
+    }
+
+    static let shippedFamilies = ["omp"]
+
+    static let shippedTargetIDs = ["omp.cli"]
+
+    /// Fixture families for the generic installer tests. OMP is shipped, not
+    /// a fixture; its manifest is covered by `CatalogTests` and
+    /// `OMPAdapterTests`.
+    static let families = [
+        "antigravity", "claude-code", "codex", "cursor", "opencode", "pi"
     ]
 
     /// Unique temporary sandbox removed by the caller.

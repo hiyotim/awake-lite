@@ -20,15 +20,18 @@ import Foundation
 ///
 /// - `session_start` fires on initial session load and carries no reason; an
 ///   open session is not work (A04).
-/// - `agent_start` / `agent_end` are "agent loop lifecycle notification" and
-///   `agent_end` "remains notification-only". `AgentEndEvent.willContinue`
-///   documents "not a terminal settle: an automatic continuation is scheduled,
-///   or background work may resume the session", and `awaitingAsyncWork`
-///   distinguishes background work.
+/// - `agent_start` / `agent_end` are "agent loop lifecycle notification".
+///   `AgentEndEvent.willContinue` documents "not a terminal settle: an
+///   automatic continuation is scheduled, or background work may resume the
+///   session", and `awaitingAsyncWork` distinguishes background work. With
+///   neither flag the loop ended, which is a terminal settle for a keep-awake
+///   observer; this is also the only end signal when the user interrupts with
+///   Esc while the session stays open.
 /// - `session_stop` is the "main-session stop hook, awaited before settle",
 ///   "never fires for task/subagent sessions", and "defers until agent-owned
-///   background jobs are fully idle". It is the documented completion boundary
-///   (A10).
+///   background jobs are fully idle". It completes a run that is still working;
+///   when `agent_end` already completed it, the model ignores the duplicate
+///   terminal update.
 /// - `auto_retry_start` / `auto_retry_end` report automatic retry, with
 ///   `AutoRetryEndEvent.success`.
 /// - `tool_approval_requested` / `tool_approval_resolved` are documented
@@ -80,14 +83,14 @@ import Foundation
 /// - `session_switch` documents only `previousSessionFile` for the old session;
 ///   no old-session identifier is documented, so a switch cannot retire the old
 ///   session's work authoritatively from the new session's handler.
-/// - `agent_end` carries no run outcome, so a main-session run that fails is
-///   reported by `auto_retry_end success: false` or ends as a settled
-///   `session_stop`, which carries no failure flag.
+/// - `agent_end` carries no run outcome, so a main-session run that fails or is
+///   aborted still settles as `completed`; `auto_retry_end success: false` is
+///   the only explicit failure signal.
 /// - A `session_stop` handler can request a continuation (the documented cap is
 ///   8), which reopens work through the next `agent_start`; no event states the
 ///   requesting handler's outcome.
-/// - No documented event closes a main-session run in a mode that never emits
-///   `session_stop`; such a run stays working until `session_shutdown`.
+/// - A mode that emits neither a terminal `agent_end` nor `session_stop` leaves
+///   a main-session run working until `session_shutdown`.
 /// - Vendor identifiers (`session`, `parentWork`) must already be canonical and
 ///   at most 64 scalars; anything else is a malformed payload. Canonicalizing
 ///   would merge two vendor ids into one session, child, or parent record. A
@@ -206,8 +209,8 @@ struct OMPAdapter: HookAdapter {
             let willContinue = payload.bool("willContinue") ?? false
             let awaitingAsyncWork = payload.bool("awaitingAsyncWork") ?? false
             if willContinue || awaitingAsyncWork {
-                // Documented as not terminal: a continuation is scheduled or
-                // background work may resume the session (A10).
+                // Documented as not a terminal settle: a continuation is
+                // scheduled or background work may resume the session (A10).
                 return try Self.run(
                     invocation,
                     payload: payload,
@@ -217,9 +220,11 @@ struct OMPAdapter: HookAdapter {
                     transition: .heartbeat
                 )
             }
-            // Without those flags the loop ended, but OMP documents agent_end
-            // as notification-only and settles a main session through
-            // session_stop. A subagent never receives session_stop, so its own
+            // `willContinue: false` is a terminal settle for the agent loop.
+            // `session_stop` is the awaited pre-settle hook, but it does not
+            // fire when the user interrupts a turn with Esc while the session
+            // stays open; treating that end as a heartbeat left the assertion
+            // held indefinitely. A subagent has no session_stop at all, so its
             // loop end is the only completion signal.
             let kind = try Self.requiredKind(payload)
             return try Self.run(
@@ -228,7 +233,7 @@ struct OMPAdapter: HookAdapter {
                 owner: owner,
                 now: now,
                 session: session,
-                transition: kind == "sub" ? .childFinished : .heartbeat
+                transition: kind == "sub" ? .childFinished : .completed
             )
 
         case "session_stop":
