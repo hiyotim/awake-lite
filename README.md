@@ -22,7 +22,7 @@ Read these documents in order:
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Which existing component owns the behavior? |
 | [AGENTS.md](AGENTS.md) | How must a coding agent work in this repository? |
 
-Start with ROADMAP R2: check real OMP delivery. The OMP-only cut and app wiring are done. Preserve current uncommitted work before resets, deletion, or branch changes.
+Start with ROADMAP R3: reliability and the remaining OMP scenarios. The OMP-only cut, app wiring, and R2 core live proof are committed at `e033bc9`. Preserve current work before resets, deletion, or branch changes.
 
 ## Build and checks
 

@@ -6,7 +6,7 @@ Updated: 2026-11-04. This update records the OMP-only surface cut, the app-owned
 
 The user selected OMP CLI (`omp.cli`) as the only first-version target. R1a (surface cut), R1b (app wiring), and the R2 core live proof are complete. The next development unit is ROADMAP R3: reliability, owner probing, storage bounds, and the remaining live scenarios.
 
-The checkpoint commit `d6f1721` was explicitly authorized. The cut, R1b, and the real OMP setup are not committed. Commits, pushes, publication, release uploads, and system installs remain separately authorized actions. The user authorized the OMP extension write for this test.
+The cut, R1b, R2, and the Esc fix are committed at `e033bc9` on branch `omp-only-minimal`; nothing was pushed. The real OMP setup lives outside git. Commits, pushes, publication, release uploads, and system installs remain separately authorized actions. The user authorized the OMP extension write for this test.
 
 ## Active scope
 
