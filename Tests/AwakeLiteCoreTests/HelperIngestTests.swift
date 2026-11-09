@@ -54,7 +54,8 @@ final class HelperIngestTests: XCTestCase {
         root: URL? = nil,
         adapters: [HookAdapter]? = nil,
         now: Date = HelperFixtures.epoch,
-        owner: OwnerIdentity? = OwnerIdentityProbe.identity(pid: getpid())
+        owner: OwnerIdentity? = OwnerIdentityProbe.identity(pid: getpid()),
+        storeLimits: LocalEventStore.Limits = LocalEventStore.Limits()
     ) -> (code: Int32, lines: [String]) {
         var lines: [String] = []
         let code = HelperRunner.run(
@@ -63,7 +64,8 @@ final class HelperIngestTests: XCTestCase {
             appSupportRoot: root ?? support,
             adapters: adapters ?? self.adapters,
             now: now,
-            owner: owner
+            owner: owner,
+            storeLimits: storeLimits
         ) { lines.append($0) }
         return (code, lines)
     }
@@ -540,7 +542,7 @@ final class HelperIngestTests: XCTestCase {
         )
     }
 
-    func testMaximumPayloadCompletesQuicklyAndLeavesNoLockOrTemporaryFile() throws {
+    func testMaximumPayloadCompletesQuicklyAndLeavesNoTemporaryFile() throws {
         try HelperFixtures.activate(root: support)
 
         let prefix = "{\"session\":\"session-1\",\"work\":\"work-1\",\"padding\":\""
@@ -564,9 +566,51 @@ final class HelperIngestTests: XCTestCase {
         XCTAssertEqual(HelperFixtures.eventFiles(in: support).count, 1)
 
         let all = HelperFixtures.files(in: support)
-        XCTAssertFalse(all.contains { $0.lastPathComponent == ".lock" })
+        // Producers serialize on the persistent `.lock`; it is not an
+        // abandoned artifact, but a temporary or backup file would be.
+        XCTAssertTrue(all.contains { $0.lastPathComponent == ".lock" })
         XCTAssertFalse(all.contains { $0.lastPathComponent.hasSuffix(".tmp") })
         XCTAssertFalse(all.contains { $0.lastPathComponent.hasPrefix(".awake-lite-") })
+    }
+
+    func testEmissionIsRefusedWhenTheInboxIsAtItsFileBound() throws {
+        try HelperFixtures.activate(root: support)
+        var limits = LocalEventStore.Limits()
+        limits.maxInboxFiles = 3
+
+        func payload(work: String) throws -> Data {
+            try HelperFixtures.payload([
+                "session": "session-1",
+                "work": work,
+                "generation": 1,
+                "sequence": 1
+            ])
+        }
+
+        for index in 0..<3 {
+            let accepted = emit(
+                arguments(),
+                payload: try payload(work: "work-\(index)"),
+                storeLimits: limits
+            )
+            XCTAssertEqual(accepted.code, 0)
+            XCTAssertEqual(accepted.lines, [])
+        }
+        XCTAssertEqual(HelperFixtures.eventFiles(in: support).count, 3)
+        let before = HelperFixtures.files(in: support).map(\.path)
+
+        let refused = emit(
+            arguments(),
+            payload: try payload(work: "payload-secret-marker"),
+            storeLimits: limits
+        )
+
+        XCTAssertEqual(refused.code, 4)
+        XCTAssertEqual(refused.lines.count, 1)
+        XCTAssertTrue(refused.lines[0].contains("the event inbox is at its file limit"))
+        XCTAssertFalse(refused.lines[0].contains("payload-secret-marker"))
+        XCTAssertEqual(HelperFixtures.eventFiles(in: support).count, 3)
+        XCTAssertEqual(HelperFixtures.files(in: support).map(\.path), before)
     }
 
     // MARK: - Owner identity

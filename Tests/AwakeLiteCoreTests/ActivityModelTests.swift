@@ -518,6 +518,152 @@ final class ActivityModelTests: XCTestCase {
         XCTAssertEqual(model.decision.state, .working)
     }
 
+    // MARK: - Session supersede
+
+    func testSupersedeEndsOlderMainRunWhenANewerOneCompleted() {
+        let shared = session("s1")
+        XCTAssertEqual(model.apply(start("ss-1", session: shared, work: "turn-1", generation: 1, at: 0)), .applied)
+        XCTAssertEqual(model.apply(start("ss-2", session: shared, work: "turn-2", generation: 2, at: 1)), .applied)
+        XCTAssertEqual(
+            model.apply(update("ss-3", transition: .completed, session: shared, work: "turn-2", generation: 2, at: 2)),
+            .applied
+        )
+        XCTAssertEqual(model.decision.state, .working)
+
+        XCTAssertEqual(model.supersedeStaleMainRuns(family: family, at: date(3)), 1)
+
+        XCTAssertEqual(record(for: shared, work: "turn-1", generation: 1)?.state, .ended)
+        XCTAssertEqual(record(for: shared, work: "turn-1", generation: 1)?.updatedAt, date(3))
+        XCTAssertEqual(record(for: shared, work: "turn-2", generation: 2)?.state, .completed)
+        XCTAssertEqual(model.decision.state, .idle)
+        XCTAssertFalse(model.decision.holdAssertion)
+    }
+
+    func testSupersedeKeepsTheNewestActiveRun() {
+        let shared = session("s1")
+        XCTAssertEqual(model.apply(start("sa-1", session: shared, work: "turn-1", generation: 1, at: 0)), .applied)
+        XCTAssertEqual(model.apply(start("sa-2", session: shared, work: "turn-2", generation: 2, at: 1)), .applied)
+
+        XCTAssertEqual(model.supersedeStaleMainRuns(family: family, at: date(2)), 1)
+
+        XCTAssertEqual(record(for: shared, work: "turn-1", generation: 1)?.state, .ended)
+        XCTAssertEqual(record(for: shared, work: "turn-2", generation: 2)?.state, .working)
+        XCTAssertEqual(model.decision.state, .working)
+        XCTAssertTrue(model.decision.holdAssertion)
+    }
+
+    func testSupersedeNeverTouchesChildWork() {
+        let shared = session("s1")
+        XCTAssertEqual(model.apply(start("sc-1", session: shared, work: "turn-3", generation: 3, at: 0)), .applied)
+        XCTAssertEqual(
+            model.apply(start("sc-2", session: shared, work: "child", generation: 1, parentWork: "p-main", at: 1)),
+            .applied
+        )
+        XCTAssertEqual(model.apply(start("sc-3", session: shared, work: "turn-5", generation: 5, at: 2)), .applied)
+
+        XCTAssertEqual(model.supersedeStaleMainRuns(family: family, at: date(3)), 1)
+
+        XCTAssertEqual(record(for: shared, work: "turn-3", generation: 3)?.state, .ended)
+        XCTAssertEqual(record(for: shared, work: "child", generation: 1)?.state, .working)
+        XCTAssertEqual(record(for: shared, work: "turn-5", generation: 5)?.state, .working)
+        XCTAssertEqual(model.decision.state, .working)
+    }
+
+    func testSupersedeIgnoresAChildsHigherGeneration() {
+        let shared = session("s1")
+        XCTAssertEqual(model.apply(start("sg-1", session: shared, work: "turn-1", generation: 1, at: 0)), .applied)
+        XCTAssertEqual(model.apply(start("sg-2", session: shared, work: "turn-2", generation: 2, at: 1)), .applied)
+        XCTAssertEqual(
+            model.apply(start("sg-3", session: shared, work: "child", generation: 10, parentWork: "turn-2", at: 2)),
+            .applied
+        )
+
+        XCTAssertEqual(model.supersedeStaleMainRuns(family: family, at: date(3)), 1)
+
+        XCTAssertEqual(record(for: shared, work: "turn-1", generation: 1)?.state, .ended)
+        XCTAssertEqual(
+            record(for: shared, work: "turn-2", generation: 2)?.state,
+            .working,
+            "a child's higher generation must not make the newest main run stale"
+        )
+        XCTAssertEqual(record(for: shared, work: "child", generation: 10)?.state, .working)
+    }
+
+    func testSupersedeIsScopedToOneSessionAndInstance() {
+        let shared = session("s1")
+        let otherSession = session("s2")
+        let otherInstance = SessionIdentity(family: family, instance: "other", session: "s1")
+
+        XCTAssertEqual(model.apply(start("sx-1", session: shared, work: "turn-1", generation: 1, at: 0)), .applied)
+        XCTAssertEqual(model.apply(start("sx-2", session: shared, work: "turn-2", generation: 2, at: 1)), .applied)
+        XCTAssertEqual(model.apply(start("sx-3", session: otherSession, work: "turn-9", generation: 9, at: 0)), .applied)
+        XCTAssertEqual(
+            model.apply(
+                start(
+                    "sx-4",
+                    session: otherInstance,
+                    work: "turn-9",
+                    generation: 9,
+                    owner: owner(instanceName: "other"),
+                    at: 0
+                )
+            ),
+            .applied
+        )
+
+        XCTAssertEqual(model.supersedeStaleMainRuns(family: family, at: date(2)), 1)
+
+        XCTAssertEqual(record(for: shared, work: "turn-1", generation: 1)?.state, .ended)
+        XCTAssertEqual(record(for: otherSession, work: "turn-9", generation: 9)?.state, .working)
+        XCTAssertEqual(record(for: otherInstance, work: "turn-9", generation: 9)?.state, .working)
+    }
+
+    func testSupersedeLeavesWorkObservedAfterTheDateAndIsIdempotent() {
+        let shared = session("s1")
+        XCTAssertEqual(model.apply(start("sf-1", session: shared, work: "turn-1", generation: 1, at: 10)), .applied)
+        XCTAssertEqual(model.apply(start("sf-2", session: shared, work: "turn-2", generation: 2, at: 20)), .applied)
+        XCTAssertEqual(
+            model.apply(update("sf-3", transition: .completed, session: shared, work: "turn-2", generation: 2, at: 21)),
+            .applied
+        )
+
+        // The stale record was observed after this date, so this pass cannot
+        // end it; the later pass can, and repeating it changes nothing.
+        XCTAssertEqual(model.supersedeStaleMainRuns(family: family, at: date(5)), 0)
+        XCTAssertEqual(record(for: shared, work: "turn-1", generation: 1)?.state, .working)
+
+        XCTAssertEqual(model.supersedeStaleMainRuns(family: family, at: date(30)), 1)
+        XCTAssertEqual(record(for: shared, work: "turn-1", generation: 1)?.state, .ended)
+        XCTAssertEqual(model.supersedeStaleMainRuns(family: family, at: date(30)), 0)
+    }
+
+    func testSupersedeSkipsOtherFamilies() {
+        let piSession = SessionIdentity(family: "pi", instance: instance, session: "s1")
+        model.activate(family: "pi", generation: 1)
+
+        func piEvent(_ id: String, _ work: String, _ generation: UInt64, at offset: TimeInterval) -> ActivityEvent {
+            ActivityEvent(
+                id: id,
+                source: "pi",
+                activationGeneration: 1,
+                owner: owner(),
+                session: piSession,
+                transition: .started,
+                work: work,
+                generation: generation,
+                timestamp: date(offset)
+            )
+        }
+
+        XCTAssertEqual(model.apply(piEvent("pf-1", "turn-1", 1, at: 0)), .applied)
+        XCTAssertEqual(model.apply(piEvent("pf-2", "turn-9", 9, at: 1)), .applied)
+
+        XCTAssertEqual(model.supersedeStaleMainRuns(family: family, at: date(10)), 0)
+        XCTAssertEqual(record(for: piSession, work: "turn-1", generation: 1)?.state, .working)
+        XCTAssertEqual(model.supersedeStaleMainRuns(family: "pi", at: date(10)), 1)
+        XCTAssertEqual(record(for: piSession, work: "turn-1", generation: 1)?.state, .ended)
+    }
+
     // MARK: - Observation gaps
 
     func testGapMakesWorkUncertainAndSnapshotRecovers() {

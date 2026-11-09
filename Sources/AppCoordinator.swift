@@ -32,6 +32,10 @@ final class AppCoordinator {
         /// the normal path; this is the bounded recovery pass.
         var reconcileInterval: TimeInterval = 30
         var storeLimits = LocalEventStore.Limits()
+        /// Verified owner termination for the persisted checkpoint. Injectable
+        /// so a test can drive the retirement path without a real process
+        /// exiting; `system()` is the production default.
+        var ownerLiveness = OwnerLiveness.system()
     }
 
     private(set) var isObserving = false
@@ -115,12 +119,43 @@ final class AppCoordinator {
             if result.deleteFailures > 0 {
                 report("\(result.deleteFailures) обработанных событий не удалось удалить; они будут повторены.")
             }
+            if activationState?.isActive(Self.observedFamily) == true {
+                settleStaleWork()
+            }
             decisionHandler(model.decision)
         } catch {
             // The store leaves every unprocessed file in place when the save
             // fails, so the next pass can retry without losing facts.
             report("События не применены: \(error)")
             deliverUnavailable("reconcileFailed")
+        }
+    }
+
+    /// Applies the two verified settlements that need no new observation: a
+    /// main run superseded by a newer generation in its session, and work whose
+    /// owner provably no longer exists.
+    ///
+    /// Runs only on the existing reconcile passes and only while the shipped
+    /// family is active, so it adds no timer. Process presence is never used as
+    /// activity evidence, and a live or indeterminate owner keeps its work.
+    /// Both changes are persisted together before the recomputed decision is
+    /// delivered; a failed save restores the in-memory model so this pass can
+    /// never claim idle from state the checkpoint does not hold.
+    private func settleStaleWork() {
+        let date = Date()
+        let previous = model
+        var changed = model.supersedeStaleMainRuns(family: Self.observedFamily, at: date) > 0
+        let dead = model.activeOwners.filter { configuration.ownerLiveness.isDead($0) }
+        for owner in dead {
+            if model.retireOwner(owner, at: date) > 0 { changed = true }
+        }
+        guard changed else { return }
+
+        do {
+            try store.saveModel(model)
+        } catch {
+            model = previous
+            report("Состояние работы не сохранено: \(error). Блокировка сна сохранена.")
         }
     }
 

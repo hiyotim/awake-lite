@@ -196,18 +196,24 @@ enum HelperRunner {
     /// production default. `owner` overrides the command-line owner (the test
     /// seam); otherwise `--owner-instance`/`--owner-pid` supply the owner, and
     /// only an invocation with neither takes the parent-process probe.
+    /// `storeLimits` is a test seam; production uses the default bounds.
     static func execute(
         arguments: [String],
         stdin: Data,
         appSupportRoot: URL? = nil,
         adapters: [HookAdapter] = HookAdapterRegistry.all,
         now: Date = Date(),
-        owner: OwnerIdentity? = nil
+        owner: OwnerIdentity? = nil,
+        storeLimits: LocalEventStore.Limits = LocalEventStore.Limits()
     ) -> HelperOutcome {
         do {
             let parsed = try parse(arguments: arguments)
             let root = appSupportRoot ?? parsed.appSupportRoot ?? defaultAppSupportRoot()
-            let normalizer = HookNormalizer(appSupportRoot: root, adapters: adapters)
+            let normalizer = HookNormalizer(
+                appSupportRoot: root,
+                adapters: adapters,
+                limits: HookNormalizer.Limits(storeLimits: storeLimits)
+            )
             try normalizer.ingest(
                 invocation: parsed.invocation,
                 payload: stdin,
@@ -234,6 +240,7 @@ enum HelperRunner {
         adapters: [HookAdapter] = HookAdapterRegistry.all,
         now: Date = Date(),
         owner: OwnerIdentity? = nil,
+        storeLimits: LocalEventStore.Limits = LocalEventStore.Limits(),
         write: (String) -> Void = HelperRunner.writeToStandardError
     ) -> Int32 {
         let outcome = execute(
@@ -242,7 +249,8 @@ enum HelperRunner {
             appSupportRoot: appSupportRoot,
             adapters: adapters,
             now: now,
-            owner: owner
+            owner: owner,
+            storeLimits: storeLimits
         )
         if let diagnostic = outcome.diagnostic {
             write(diagnostic)

@@ -400,6 +400,8 @@ struct HookNormalizer {
             return "the event carries a non-canonical identifier"
         case .eventTooLarge:
             return "the event exceeds the stored event size bound"
+        case .inboxFull:
+            return "the event inbox is at its file limit"
         case .locked:
             return "the event store is locked by another process"
         case .invalidCheckpoint(let path):

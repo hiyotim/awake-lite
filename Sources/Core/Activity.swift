@@ -434,6 +434,97 @@ struct ActivityModel: Codable {
         }
     }
 
+    // MARK: Owners
+
+    /// Distinct owners of active work, in a deterministic order.
+    ///
+    /// `instance` is the final tie-break so two records that agree on every
+    /// measured field still produce a stable order.
+    var activeOwners: [OwnerIdentity] {
+        var seen: Set<OwnerIdentity> = []
+        var owners: [OwnerIdentity] = []
+        for record in works.values where record.state.isActive {
+            if seen.insert(record.owner).inserted { owners.append(record.owner) }
+        }
+        return owners.sorted { lhs, rhs in
+            (lhs.pid, lhs.uid, lhs.startTimeMicros, lhs.bootID, lhs.instance)
+                < (rhs.pid, rhs.uid, rhs.startTimeMicros, rhs.bootID, rhs.instance)
+        }
+    }
+
+    /// Ends the active work owned by `owner` that was not observed after
+    /// `date`, and returns how many records were retired.
+    ///
+    /// This is the single rule behind both a reported and a probed owner
+    /// termination: a termination never ends work observed later and never
+    /// moves `updatedAt` backwards, while work owned by any other process stays
+    /// accounted for.
+    @discardableResult
+    mutating func retireOwner(_ owner: OwnerIdentity, at date: Date) -> Int {
+        let affected = works
+            .filter {
+                $0.value.state.isActive
+                    && $0.value.owner == owner
+                    && $0.value.updatedAt <= date
+            }
+            .map(\.key)
+        for identity in affected {
+            works[identity]?.state = .ended
+            works[identity]?.updatedAt = date
+        }
+        pruneTerminal()
+        return affected.count
+    }
+
+    /// Ends active main runs that a newer run in the same session has replaced,
+    /// and returns how many records were ended.
+    ///
+    /// The extension reports `run_superseded` for the run it replaces, but that
+    /// emission is best-effort: a lost write, or a `session_start` that reset
+    /// the extension's generator, can leave the old run `working` forever while
+    /// its owner process stays alive, so no liveness rule may retire it. A
+    /// record of a higher generation exists only when the session moved on, so
+    /// a lower-generation main run cannot still be its current run. This is the
+    /// model's defense against a missed supersede; it never uses process
+    /// presence as activity evidence and leaves gaps untouched.
+    ///
+    /// Only main runs (`parentWork == nil`) are considered: a child is a
+    /// separate work item and its generation is not ordered against its
+    /// parent's, so the group maximum is taken over main runs only and a
+    /// child's higher generation cannot make its parent look stale. Records are
+    /// grouped by the full `SessionIdentity`, so another session, instance, or
+    /// family is never affected, and a record updated after `date` is left
+    /// alone like every other termination path. Repeated calls are idempotent.
+    @discardableResult
+    mutating func supersedeStaleMainRuns(family: String, at date: Date) -> Int {
+        var newest: [SessionIdentity: UInt64] = [:]
+        for record in works.values
+        where record.identity.session.family == family && record.parentWork == nil {
+            let session = record.identity.session
+            newest[session] = max(newest[session] ?? 0, record.identity.generation)
+        }
+
+        let affected = works
+            .filter { entry in
+                let record = entry.value
+                guard record.identity.session.family == family,
+                      record.parentWork == nil,
+                      record.state.isActive,
+                      record.updatedAt <= date,
+                      let newestGeneration = newest[record.identity.session] else {
+                    return false
+                }
+                return record.identity.generation < newestGeneration
+            }
+            .map(\.key)
+        for identity in affected {
+            works[identity]?.state = .ended
+            works[identity]?.updatedAt = date
+        }
+        pruneTerminal()
+        return affected.count
+    }
+
     // MARK: Decision
 
     var decision: AggregateDecision {
@@ -705,19 +796,10 @@ struct ActivityModel: Codable {
     /// that arrives after work was observed again cannot retire it, and a late
     /// report never moves `updatedAt` backwards. This keeps a detached or
     /// reordered teardown event from ending a run that has since restarted.
+    /// `retireOwner` owns the rule; the event path only supplies its owner and
+    /// timestamp.
     private mutating func applyOwnerTerminated(_ event: ActivityEvent) -> ApplyOutcome {
-        let affected = works
-            .filter {
-                $0.value.state.isActive
-                    && $0.value.owner == event.owner
-                    && $0.value.updatedAt <= event.timestamp
-            }
-            .map(\.key)
-        for identity in affected {
-            works[identity]?.state = .ended
-            works[identity]?.updatedAt = event.timestamp
-        }
-        pruneTerminal()
+        retireOwner(event.owner, at: event.timestamp)
         return .applied
     }
 

@@ -73,10 +73,14 @@ import Foundation
 /// `working`, and OMP emits no event that closes the replaced run in a mode
 /// that never reaches `session_stop`. The asset keeps the previous generation
 /// and emits `run_superseded` with `{session, workGeneration: <previous>}`
-/// immediately before the new `agent_start`, which this adapter maps to
-/// `cancelled` for that generation with no sequence. Without it the replaced
-/// run would hold the assertion until the process shuts down. OMP never emits
-/// this name; it exists only between the bundled asset and the helper.
+/// immediately before the new `agent_start`, and before resetting the
+/// generator on a `session_start` that arrives while a run is active; this
+/// adapter maps it to `cancelled` for that generation with no sequence.
+/// Without it the replaced run would hold the assertion until the process
+/// shuts down. The model also ends an active main run whose generation is
+/// older than the newest record in the same session, so one lost best-effort
+/// emission cannot hold the assertion forever. OMP never emits this name; it
+/// exists only between the bundled asset and the helper.
 ///
 /// Documented limitations, recorded rather than guessed:
 ///

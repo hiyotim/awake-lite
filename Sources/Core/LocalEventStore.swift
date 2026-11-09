@@ -9,6 +9,10 @@ import Foundation
 /// between those steps replays events as duplicates instead of losing facts.
 struct LocalEventStore {
     struct Limits: Equatable {
+        /// Hard bound on stored `*.event` files. `enqueue` refuses a write
+        /// before creating anything once the inbox holds this many, and
+        /// `reconcile` treats an inbox at or above it as storage loss, so the
+        /// same number bounds the queue from both sides.
         var maxInboxFiles = 2048
         var maxEventBytes = 64 * 1024
         var maxEventsPerPass = 512
@@ -165,6 +169,14 @@ struct LocalEventStore {
     /// silently aliased. Re-enqueuing the exact same event is idempotent — the
     /// stored bytes are already identical — while a different payload under an
     /// existing name is refused rather than merged.
+    ///
+    /// The count check and the write happen under the existing `.lock` writer
+    /// lock, so cooperating producers serialize and the bound cannot be
+    /// exceeded by a race. A producer waits at most `enqueueLockWait` for the
+    /// lock and then reports `StoreError.locked`; that bounded wait is the only
+    /// latency this adds. Writers that bypass `enqueue` (a stale binary, a
+    /// manual copy) are not counted; `reconcile` still reports such a queue as
+    /// storage overflow.
     func enqueue(_ event: ActivityEvent) throws {
         try prepare()
         guard EventFileName.sanitize(event.source) == event.source,
@@ -186,7 +198,27 @@ struct LocalEventStore {
         }
 
         let name = EventFileName.make(event: event, at: event.timestamp)
+        // The refusal must happen before any file exists, so the bound is
+        // enforced across both the count and `writeLinked`. `enqueue` never
+        // calls a locking method, so this cannot nest.
+        let descriptor = try acquireLock(waitingUpTo: Self.enqueueLockWait)
+        defer { releaseLock(descriptor) }
+        guard try inboxEventCount() < limits.maxInboxFiles else {
+            throw StoreError.inboxFull
+        }
         try writeLinked(data, named: name, in: inbox, mode: 0o600)
+    }
+
+    /// Number of stored event files. Other temporary or rejected artifacts do
+    /// not consume the bound.
+    private func inboxEventCount() throws -> Int {
+        let names: [String]
+        do {
+            names = try FileManager.default.contentsOfDirectory(atPath: inbox.path)
+        } catch {
+            throw StoreError.writeFailed(error.localizedDescription)
+        }
+        return names.reduce(0) { $0 + ($1.hasSuffix(".event") ? 1 : 0) }
     }
 
     /// Creates the event file without ever replacing an existing one: the
@@ -266,12 +298,22 @@ struct LocalEventStore {
     /// Applies a bounded batch of inbox events to `model`.
     ///
     /// The checkpoint is saved before any file is moved or deleted. Rejected
-    /// files move to `rejected/` and leave an `eventRejected` gap. An inbox
-    /// above its file bound leaves a `storageOverflow` gap for every affected
-    /// scope; neither condition permits a confirmed-idle claim.
+    /// files move to `rejected/` and leave an `eventRejected` gap. An inbox at
+    /// or above its file bound leaves a `storageOverflow` gap for every
+    /// affected scope; neither condition permits a confirmed-idle claim.
+    ///
+    /// The bound is a storage-loss signal, not a transient count: a full queue
+    /// means at least one emission was refused, and the gap is cleared only by
+    /// an authoritative snapshot or package removal, never by the files
+    /// draining on a later pass.
+    ///
+    /// Producers now share this same `.lock` for one short count-and-link
+    /// window, so the pass waits up to `enqueueLockWait` for it instead of
+    /// failing on the first attempt. A lock still held past that bound fails
+    /// with `StoreError.locked`, and nothing is applied or deleted.
     func reconcile(_ model: inout ActivityModel, deletingProcessed: Bool = true) throws -> ReconcileReport {
         try prepare()
-        let lockDescriptor = try acquireLock()
+        let lockDescriptor = try acquireLock(waitingUpTo: Self.enqueueLockWait)
         defer { releaseLock(lockDescriptor) }
 
         let manager = FileManager.default
@@ -280,7 +322,7 @@ struct LocalEventStore {
             .filter { $0.hasSuffix(".event") }
             .sorted()
 
-        if names.count > limits.maxInboxFiles {
+        if names.count >= limits.maxInboxFiles {
             report.overflowed = true
             let now = Date()
             var scopes = Set<GapKey>()
@@ -536,19 +578,37 @@ struct LocalEventStore {
 
     // MARK: - Writer lock
 
-    /// One exclusive, non-blocking writer at a time. A busy store is an error,
-    /// not a reason to skip the pass silently.
-    private func acquireLock() throws -> Int32 {
+    /// Longest a producer waits for the writer lock before failing with
+    /// `StoreError.locked`. Short enough to stay inside the two-second
+    /// processing target; only `enqueue` waits.
+    static let enqueueLockWait: TimeInterval = 0.5
+
+    /// Lock retry slice for the bounded wait.
+    private static let lockRetryInterval: TimeInterval = 0.005
+
+    /// One exclusive writer at a time. Without a wait the store fails
+    /// immediately; `enqueue` passes a short bound so cooperating producers
+    /// serialize on the count-and-write instead of both seeing room.
+    ///
+    /// The lock is the existing `.lock` file, so a waiting producer adds no
+    /// second lock or nested acquisition: callers that already hold it only
+    /// use the unlocked internals.
+    private func acquireLock(waitingUpTo wait: TimeInterval = 0) throws -> Int32 {
         let descriptor = lock.path.withCString {
             open($0, O_RDWR | O_CREAT | O_CLOEXEC, 0o600)
         }
         guard descriptor >= 0 else { throw StoreError.posix(errno) }
-        guard flock(descriptor, LOCK_EX | LOCK_NB) == 0 else {
+
+        let deadline = Date().addingTimeInterval(max(0, wait))
+        while true {
+            if flock(descriptor, LOCK_EX | LOCK_NB) == 0 { return descriptor }
             let code = errno
-            _ = Darwin.close(descriptor)
-            throw code == EWOULDBLOCK ? StoreError.locked : StoreError.posix(code)
+            guard code == EWOULDBLOCK, wait > 0, Date() < deadline else {
+                _ = Darwin.close(descriptor)
+                throw code == EWOULDBLOCK ? StoreError.locked : StoreError.posix(code)
+            }
+            Thread.sleep(forTimeInterval: Self.lockRetryInterval)
         }
-        return descriptor
     }
 
     private func releaseLock(_ descriptor: Int32) {
@@ -729,5 +789,7 @@ enum StoreError: Error, Equatable {
     case unsupportedCheckpoint(String, Int)
     case invalidIdentifier
     case eventTooLarge
+    /// The inbox already holds `Limits.maxInboxFiles` event files.
+    case inboxFull
     case locked
 }

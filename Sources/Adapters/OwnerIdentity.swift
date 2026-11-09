@@ -241,3 +241,94 @@ enum OwnerIdentityProbe {
         return (Int64(value.tv_sec), Int32(value.tv_usec))
     }
 }
+
+// MARK: - Owner liveness
+
+/// Decides whether a recorded owner process provably no longer exists.
+///
+/// This is the only path that retires work without a lifecycle event, so every
+/// rule is deliberately conservative: a wrong "dead" would claim idle while the
+/// harness is still working and release the sleep assertion, so anything the
+/// probe cannot prove keeps the work. The direction of every uncertainty is
+/// therefore "not dead".
+///
+/// Production (`system()`) rules, in order:
+///
+/// 1. A boot token that differs from the current boot is dead: the recorded
+///    process cannot exist on this boot.
+/// 2. `pid <= 1` is dead: no harness and no process this app may own.
+/// 3. `kill(pid, 0)` returning `-1` with `ESRCH` is dead. Any other failure,
+///    including `EPERM`, and any result the OS does not make determinate, is
+///    not dead.
+/// 4. A measured owner (`startTimeMicros > 0`) is dead only when a fresh
+///    `OwnerIdentityProbe.measure(pid:)` is measured and disagrees on pid,
+///    uid, start time, or boot token; an unmeasurable process is not dead.
+/// 5. A supplied owner (`startTimeMicros == 0`, the OMP extension contract) is
+///    dead only when the pid is provably absent. A live pid cannot be
+///    distinguished from a reused PID, so it is never treated as dead.
+///
+/// `instance` is caller-owned text and is never compared here.
+struct OwnerLiveness {
+    /// Three-state answer to "does this pid exist". `unknown` is not dead.
+    enum Presence {
+        case alive
+        case absent
+        case unknown
+    }
+
+    var isDead: (OwnerIdentity) -> Bool
+
+    /// Production implementation: current boot token, `kill`, and libproc.
+    static func system() -> OwnerLiveness {
+        OwnerLiveness { owner in
+            evaluate(
+                owner: owner,
+                bootToken: OwnerIdentityProbe.bootToken(),
+                presence: presence(pid: owner.pid),
+                measure: { OwnerIdentityProbe.measure(pid: $0) }
+            )
+        }
+    }
+
+    /// The documented rules without process access, so XCTest can prove the
+    /// measured-owner comparison and the unknown-presence rule without forcing
+    /// a real PID reuse.
+    static func evaluate(
+        owner: OwnerIdentity,
+        bootToken: String,
+        presence: Presence,
+        measure: (Int32) -> OwnerProbe
+    ) -> Bool {
+        guard owner.bootID == bootToken else { return true }
+        guard owner.pid > 1 else { return true }
+
+        switch presence {
+        case .absent:
+            return true
+        case .unknown:
+            return false
+        case .alive:
+            break
+        }
+
+        // A supplied owner carries no start time by contract; presence is all
+        // the evidence there is, and a live pid is never enough to release it.
+        guard owner.startTimeMicros > 0 else { return false }
+
+        let probe = measure(owner.pid)
+        guard probe.measured else { return false }
+        let measured = probe.identity
+        return measured.pid != owner.pid
+            || measured.uid != owner.uid
+            || measured.startTimeMicros != owner.startTimeMicros
+            || measured.bootID != owner.bootID
+    }
+
+    /// Maps `kill(pid, 0)` onto the three states. Only `ESRCH` proves absence;
+    /// `EPERM` proves the process exists but not that it is the recorded one,
+    /// so both that and any unexpected error stay indeterminate.
+    private static func presence(pid: Int32) -> Presence {
+        if kill(pid, 0) == 0 { return .alive }
+        return errno == ESRCH ? .absent : .unknown
+    }
+}

@@ -177,6 +177,184 @@ final class AppCoordinatorTests: XCTestCase {
         XCTAssertEqual(try LocalEventStore(root: support).loadModel().activeGenerations["omp"], 2)
     }
 
+    // MARK: - Owner liveness
+
+    func testDeadOwnerRetiresWorkAndRecomputesDecision() throws {
+        try HelperFixtures.activate(family: "omp", root: support)
+        var dead = false
+        let coordinator = makeCoordinator(liveness: OwnerLiveness { _ in dead })
+        coordinator.start()
+
+        _ = try emit("agent_start", payload: ["session": "s7", "workGeneration": 1, "agentKind": "main"])
+        coordinator.reconcileNow()
+
+        XCTAssertEqual(decisions.last?.state, .working)
+        XCTAssertEqual(decisions.last?.holdAssertion, true)
+        XCTAssertEqual(try LocalEventStore(root: support).loadModel().activeOwners.count, 1)
+
+        dead = true
+        coordinator.reconcileNow()
+
+        XCTAssertEqual(decisions.last?.state, .idle)
+        XCTAssertEqual(decisions.last?.holdAssertion, false)
+        let retired = try LocalEventStore(root: support).loadModel()
+        XCTAssertTrue(retired.activeOwners.isEmpty)
+        XCTAssertEqual(retired.works.values.filter { $0.state.isActive }.count, 0)
+        XCTAssertEqual(retired.decision.state, .idle)
+
+        // The next task is observed normally after the retirement.
+        dead = false
+        _ = try emit("agent_start", payload: ["session": "s8", "workGeneration": 1, "agentKind": "main"])
+        coordinator.reconcileNow()
+        XCTAssertEqual(decisions.last?.state, .working)
+        XCTAssertEqual(decisions.last?.holdAssertion, true)
+
+        _ = try emit("session_stop", payload: ["session": "s8", "workGeneration": 1, "agentKind": "main"])
+        coordinator.reconcileNow()
+        XCTAssertEqual(decisions.last?.state, .idle)
+        XCTAssertEqual(decisions.last?.holdAssertion, false)
+    }
+
+    func testSuppliedLiveOwnerIsNotReleased() throws {
+        try HelperFixtures.activate(family: "omp", root: support)
+        let coordinator = makeCoordinator()
+        coordinator.start()
+
+        let supplied = (instance: "p\(getpid())-supplied", pid: getpid())
+        _ = try emit(
+            "agent_start",
+            payload: ["session": "s9", "workGeneration": 1, "agentKind": "main"],
+            suppliedOwner: supplied
+        )
+        coordinator.reconcileNow()
+        XCTAssertEqual(decisions.last?.state, .working)
+        XCTAssertEqual(decisions.last?.holdAssertion, true)
+
+        coordinator.reconcileNow()
+        XCTAssertEqual(decisions.last?.state, .working)
+        XCTAssertEqual(decisions.last?.holdAssertion, true)
+
+        let model = try LocalEventStore(root: support).loadModel()
+        XCTAssertEqual(model.activeOwners.count, 1)
+        XCTAssertEqual(model.activeOwners.first?.startTimeMicros, 0)
+        XCTAssertEqual(model.works.values.filter { $0.state.isActive }.count, 1)
+    }
+
+    func testSuppliedDeadOwnerIsEndedByReconcile() throws {
+        try HelperFixtures.activate(family: "omp", root: support)
+        let coordinator = makeCoordinator()
+        coordinator.start()
+
+        let pid = try DeadProcess.pid()
+        _ = try emit(
+            "agent_start",
+            payload: ["session": "s10", "workGeneration": 1, "agentKind": "main"],
+            suppliedOwner: ("p\(pid)-dead", pid)
+        )
+        coordinator.reconcileNow()
+
+        XCTAssertEqual(decisions.last?.state, .idle)
+        XCTAssertEqual(decisions.last?.holdAssertion, false)
+        let model = try LocalEventStore(root: support).loadModel()
+        XCTAssertTrue(model.activeOwners.isEmpty)
+        XCTAssertEqual(model.works.values.filter { $0.state.isActive }.count, 0)
+        XCTAssertEqual(model.decision.state, .idle)
+    }
+
+    // MARK: - Orphaned run supersede
+
+    func testStartupSupersedeEndsOrphanedRunAfterNewerCompletion() throws {
+        try HelperFixtures.activate(family: "omp", root: support)
+        let seeded = try seedOrphanCheckpoint()
+        let coordinator = makeCoordinator()
+        coordinator.start()
+
+        XCTAssertEqual(decisions.last?.state, .idle)
+        XCTAssertEqual(decisions.last?.holdAssertion, false)
+
+        let model = try LocalEventStore(root: support).loadModel()
+        XCTAssertEqual(
+            model.works[WorkIdentity(session: seeded.session, generation: 1, work: "turn-1")]?.state,
+            .ended
+        )
+        XCTAssertEqual(
+            model.works[WorkIdentity(session: seeded.session, generation: 2, work: "turn-2")]?.state,
+            .completed
+        )
+        XCTAssertEqual(model.works.values.filter { $0.state.isActive }.count, 0)
+        XCTAssertEqual(model.decision.state, .idle)
+    }
+
+    func testStartupSupersedeKeepsANewerActiveRun() throws {
+        try HelperFixtures.activate(family: "omp", root: support)
+        let seeded = try seedOrphanCheckpoint(newerCompleted: false)
+        let coordinator = makeCoordinator()
+        coordinator.start()
+
+        XCTAssertEqual(decisions.last?.state, .working)
+        XCTAssertEqual(decisions.last?.holdAssertion, true)
+
+        let model = try LocalEventStore(root: support).loadModel()
+        XCTAssertEqual(
+            model.works[WorkIdentity(session: seeded.session, generation: 1, work: "turn-1")]?.state,
+            .ended
+        )
+        XCTAssertEqual(
+            model.works[WorkIdentity(session: seeded.session, generation: 2, work: "turn-2")]?.state,
+            .working,
+            "the live supplied owner keeps the newest run"
+        )
+    }
+
+    func testStartupSupersedeLeavesChildWorkAlone() throws {
+        try HelperFixtures.activate(family: "omp", root: support)
+        let seeded = try seedOrphanCheckpoint(childGeneration: 1)
+        let coordinator = makeCoordinator()
+        coordinator.start()
+
+        XCTAssertEqual(decisions.last?.state, .working)
+        XCTAssertEqual(decisions.last?.holdAssertion, true)
+
+        let model = try LocalEventStore(root: support).loadModel()
+        XCTAssertEqual(
+            model.works[WorkIdentity(session: seeded.session, generation: 1, work: "turn-1")]?.state,
+            .ended
+        )
+        XCTAssertEqual(
+            model.works[WorkIdentity(session: seeded.session, generation: 1, work: "child")]?.state,
+            .working
+        )
+        XCTAssertEqual(
+            model.works[WorkIdentity(session: seeded.session, generation: 2, work: "turn-2")]?.state,
+            .completed
+        )
+    }
+
+    func testStartupSupersedeIgnoresHigherChildGeneration() throws {
+        try HelperFixtures.activate(family: "omp", root: support)
+        let seeded = try seedOrphanCheckpoint(childGeneration: 10, newerCompleted: false)
+        let coordinator = makeCoordinator()
+        coordinator.start()
+
+        XCTAssertEqual(decisions.last?.state, .working)
+        XCTAssertEqual(decisions.last?.holdAssertion, true)
+
+        let model = try LocalEventStore(root: support).loadModel()
+        XCTAssertEqual(
+            model.works[WorkIdentity(session: seeded.session, generation: 1, work: "turn-1")]?.state,
+            .ended
+        )
+        XCTAssertEqual(
+            model.works[WorkIdentity(session: seeded.session, generation: 2, work: "turn-2")]?.state,
+            .working,
+            "a child's higher generation must not end the newest main run"
+        )
+        XCTAssertEqual(
+            model.works[WorkIdentity(session: seeded.session, generation: 10, work: "child")]?.state,
+            .working
+        )
+    }
+
     // MARK: - Real IOKit
 
     func testRealAssertionFollowsCoordinatorDecisions() throws {
@@ -216,9 +394,66 @@ final class AppCoordinatorTests: XCTestCase {
 
     // MARK: - Helpers
 
+    /// Saves a checkpoint whose session holds an older active main run and a
+    /// newer run, both owned by a live supplied owner. The startup pass must
+    /// end only the older main run.
+    @discardableResult
+    private func seedOrphanCheckpoint(
+        childGeneration: UInt64? = nil,
+        newerCompleted: Bool = true
+    ) throws -> (owner: OwnerIdentity, session: SessionIdentity) {
+        let supplied = OwnerIdentityProbe.supplied(instance: "p\(getpid())-test", pid: getpid())
+        let session = SessionIdentity(family: "omp", instance: supplied.instance, session: "s1")
+        let base = Date(timeIntervalSince1970: 1_700_000_000)
+
+        func event(
+            _ id: String,
+            _ transition: ActivityTransition,
+            _ work: String,
+            generation: UInt64,
+            parentWork: String? = nil,
+            offset: TimeInterval
+        ) -> ActivityEvent {
+            ActivityEvent(
+                id: id,
+                source: "omp",
+                activationGeneration: 1,
+                owner: supplied,
+                session: session,
+                transition: transition,
+                work: work,
+                generation: generation,
+                parentWork: parentWork,
+                timestamp: base.addingTimeInterval(offset)
+            )
+        }
+
+        var seeded = ActivityModel()
+        seeded.activate(family: "omp", generation: 1)
+        XCTAssertEqual(seeded.apply(event("seed-old", .started, "turn-1", generation: 1, offset: 0)), .applied)
+        if let childGeneration {
+            XCTAssertEqual(
+                seeded.apply(
+                    event("seed-child", .started, "child", generation: childGeneration, parentWork: "turn-1", offset: 1)
+                ),
+                .applied
+            )
+        }
+        XCTAssertEqual(seeded.apply(event("seed-new", .started, "turn-2", generation: 2, offset: 1)), .applied)
+        if newerCompleted {
+            XCTAssertEqual(
+                seeded.apply(event("seed-new-done", .completed, "turn-2", generation: 2, offset: 2)),
+                .applied
+            )
+        }
+        try LocalEventStore(root: support).saveModel(seeded)
+        return (supplied, session)
+    }
+
     @discardableResult
     private func makeCoordinator(
         interval: TimeInterval = 0,
+        liveness: OwnerLiveness = .system(),
         decisionHandler: ((AggregateDecision) -> Void)? = nil
     ) -> AppCoordinator {
         let coordinator = AppCoordinator(
@@ -226,7 +461,8 @@ final class AppCoordinatorTests: XCTestCase {
                 appSupportRoot: support,
                 catalogRoot: IntegrationFixtures.shippedIntegrationsRoot,
                 helperPath: IntegrationPaths.helperPath,
-                reconcileInterval: interval
+                reconcileInterval: interval,
+                ownerLiveness: liveness
             ),
             decisionHandler: { [weak self] decision in
                 self?.decisions.append(decision)
@@ -244,21 +480,29 @@ final class AppCoordinatorTests: XCTestCase {
     private func emit(
         _ event: String,
         payload: [String: Any],
-        generation: UInt64 = 1
+        generation: UInt64 = 1,
+        suppliedOwner: (instance: String, pid: Int32)? = nil
     ) throws -> Int32 {
+        var arguments = [
+            "--family", "omp",
+            "--target", "omp.cli",
+            "--generation", String(generation),
+            "--event", event
+        ]
+        if let suppliedOwner {
+            arguments += [
+                "--owner-instance", suppliedOwner.instance,
+                "--owner-pid", String(suppliedOwner.pid)
+            ]
+        }
         var lines: [String] = []
         let code = HelperRunner.run(
-            arguments: [
-                "--family", "omp",
-                "--target", "omp.cli",
-                "--generation", String(generation),
-                "--event", event
-            ],
+            arguments: arguments,
             stdin: try HelperFixtures.payload(payload),
             appSupportRoot: support,
             adapters: [OMPAdapter()],
             now: Date(),
-            owner: owner
+            owner: suppliedOwner == nil ? owner : nil
         ) { lines.append($0) }
         XCTAssertEqual(lines, [], "\(event) should not produce a diagnostic")
         return code

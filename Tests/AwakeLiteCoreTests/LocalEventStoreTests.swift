@@ -113,12 +113,22 @@ final class LocalEventStoreTests: XCTestCase {
         var limits = LocalEventStore.Limits()
         limits.maxInboxFiles = 4
         let limited = LocalEventStore(root: root, limits: limits)
+        try limited.prepare()
 
+        // Written directly: `enqueue` refuses past the bound, and reconcile
+        // must still notice a queue that an older or non-cooperating producer
+        // left above it.
         for index in 0..<8 {
             let instanceName = index.isMultiple(of: 2) ? instance : "other"
-            try limited.enqueue(
-                event("o\(index)", work: "work-\(index)", instanceName: instanceName, at: epoch.addingTimeInterval(Double(index)))
+            let event = event(
+                "o\(index)",
+                work: "work-\(index)",
+                instanceName: instanceName,
+                at: epoch.addingTimeInterval(Double(index))
             )
+            let name = EventFileName.make(event: event, at: event.timestamp)
+            let data = try JSONEncoder().encode(event)
+            try data.write(to: limited.inbox.appendingPathComponent(name))
         }
 
         var model = activatedModel()
@@ -129,6 +139,61 @@ final class LocalEventStoreTests: XCTestCase {
         let overflowGaps = model.gaps.values.filter { $0.reasons.contains(.storageOverflow) }
         XCTAssertEqual(overflowGaps.count, 2)
         XCTAssertNotEqual(model.decision.state, .idle)
+    }
+
+    func testEnqueueRefusesAtTheInboxBoundBeforeCreatingAnything() throws {
+        var limits = LocalEventStore.Limits()
+        limits.maxInboxFiles = 3
+        let limited = LocalEventStore(root: root, limits: limits)
+
+        for index in 0..<3 {
+            try limited.enqueue(
+                event("cap-\(index)", work: "work-\(index)", at: epoch.addingTimeInterval(Double(index)))
+            )
+        }
+        XCTAssertEqual(try inboxNames().filter { $0.hasSuffix(".event") }.count, 3)
+
+        XCTAssertThrowsError(
+            try limited.enqueue(
+                event("cap-3", work: "work-3", at: epoch.addingTimeInterval(3)))
+        ) { error in
+            XCTAssertEqual(error as? StoreError, .inboxFull)
+        }
+
+        let names = try inboxNames()
+        XCTAssertEqual(names.filter { $0.hasSuffix(".event") }.count, 3)
+        XCTAssertFalse(names.contains { $0.contains(".tmp") }, "the refused write leaves no temporary file: \(names)")
+        XCTAssertFalse(names.contains { $0.contains("cap-3") })
+    }
+
+    func testInboxAtTheBoundRecordsOverflowGapAndPreventsIdle() throws {
+        var limits = LocalEventStore.Limits()
+        limits.maxInboxFiles = 3
+        let limited = LocalEventStore(root: root, limits: limits)
+
+        for index in 0..<3 {
+            try limited.enqueue(
+                event("full-\(index)", work: "work-\(index)", at: epoch.addingTimeInterval(Double(index)))
+            )
+        }
+
+        // No active generation: the events are inert and leave no
+        // `eventRejected` gap, so the full queue is the only reason the pass
+        // cannot claim idle.
+        var model = ActivityModel()
+        let report = try limited.reconcile(&model)
+
+        XCTAssertTrue(report.overflowed)
+        XCTAssertEqual(report.applied, 0)
+        XCTAssertEqual(report.ignored["inactiveSource"], 3)
+        XCTAssertEqual(report.processedFiles, 3)
+        let overflowGaps = model.gaps.values.filter { $0.reasons.contains(.storageOverflow) }
+        XCTAssertEqual(overflowGaps.count, 1)
+        XCTAssertEqual(overflowGaps.first?.family, family)
+        XCTAssertEqual(overflowGaps.first?.instance, instance)
+        XCTAssertEqual(model.decision.state, .unknown)
+        XCTAssertFalse(model.decision.holdAssertion)
+        XCTAssertEqual(try inboxNames(), [], "the pass drains the files as usual")
     }
 
     // MARK: - Rejection
@@ -642,6 +707,32 @@ final class LocalEventStoreTests: XCTestCase {
         let report = try store.reconcile(&model)
         XCTAssertEqual(report.applied, 1)
         XCTAssertEqual(try inboxNames(), [])
+    }
+
+    func testReconcileWaitsForAProducerHoldingTheWriterLock() throws {
+        try store.prepare()
+        try store.enqueue(event("waited", work: "w", at: epoch))
+
+        let descriptor = store.lock.path.withCString { open($0, O_RDWR | O_CREAT | O_CLOEXEC, 0o600) }
+        XCTAssertGreaterThanOrEqual(descriptor, 0)
+        XCTAssertEqual(flock(descriptor, LOCK_EX | LOCK_NB), 0)
+
+        // A producer releases the shared lock well inside the bounded wait, so
+        // the pass must retry and apply instead of reporting `locked`.
+        let released = DispatchSemaphore(value: 0)
+        DispatchQueue.global().async {
+            Thread.sleep(forTimeInterval: 0.1)
+            XCTAssertEqual(flock(descriptor, LOCK_UN), 0)
+            _ = Darwin.close(descriptor)
+            released.signal()
+        }
+
+        var model = activatedModel()
+        let report = try store.reconcile(&model)
+
+        XCTAssertEqual(report.applied, 1)
+        XCTAssertEqual(try inboxNames(), [])
+        released.wait()
     }
 
     // MARK: - Permissions

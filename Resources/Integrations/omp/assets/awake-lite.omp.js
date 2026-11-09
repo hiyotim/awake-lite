@@ -108,6 +108,14 @@ function runFields(ctx) {
 
 export default function awakeLiteOmp(pi) {
   pi.on("session_start", function (event, ctx) {
+    // A session start can arrive while a run from this process is still
+    // active. Supersede it before resetting the generator: otherwise the next
+    // `agent_start` sees no previous run and the replaced generation is
+    // orphaned. The app also collapses a lost supersede from a newer
+    // generation in the same session, but this keeps the normal path exact.
+    if (runGeneration > 0) {
+      report("run_superseded", { session: currentSession(ctx), workGeneration: runGeneration });
+    }
     runGeneration = 0;
     report("session_start", { session: currentSession(ctx) });
   });
@@ -123,7 +131,9 @@ export default function awakeLiteOmp(pi) {
     // A new agent loop needs a discriminator no earlier loop in this session
     // can reuse, including after a reload restarts this module. The generation
     // it replaces is closed first: a continuation, retry, or reloaded runtime
-    // emits no event that ends the superseded run.
+    // emits no event that ends the superseded run. The app also ends an active
+    // main run when a newer generation exists in the same session, so a lost
+    // supersede cannot hold the assertion forever.
     const previous = runGeneration;
     runGeneration = Math.max(Date.now(), previous + 1);
     if (previous > 0) {
