@@ -59,6 +59,7 @@ private struct MenuBarContent: View {
         Toggle("Пауза", isOn: controller.pauseBinding)
         Toggle("Запускать при входе", isOn: LoginItem.binding)
         Divider()
+        Button("Настроить OMP…") { IntegrationsWindowController.shared.show(setupFamily: "omp") }
         Button("Интеграции…") { IntegrationsWindowController.shared.show() }
         Divider()
         Button("Выйти") { controller.quit() }

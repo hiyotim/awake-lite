@@ -1,6 +1,6 @@
 # AwakeLite state
 
-Updated: 2026-11-09. This update records the OMP-only surface cut, the app-owned startup and observation path, and the first real OMP delivery run. The pre-cut implementation is commit `d6f1721` on branch `omp-only-minimal`; nothing was pushed.
+Updated: 2026-11-10. This update records the OMP-only surface cut, the app-owned startup and observation path, and the first real OMP delivery run. The pre-cut implementation is commit `d6f1721` on branch `omp-only-minimal`; nothing was pushed.
 
 ## Current task and authorization
 
@@ -102,7 +102,7 @@ Residual limitations of the fix: it needs a higher-generation main record in the
 1. Remaining live scenarios were not exercised: auto-retry, background work, parallel sessions/subagents, and approval denial. A killed approval probe left a working record until reinstall changed the generation; owner death has since been observed live through process replacement and a foreign-boot owner, and a mid-work SIGKILL retired that owner's work, but the exact quiet-window assertion-release latency after owner death is still unmeasured.
 2. Runtime owner validation retires a measured dead owner (`R3a`); live retirement was observed on 2026-11-09, including a mid-work SIGKILL of the owner that held three `working` records. OMP's supplied owner token has no measured start time, so a live pid still cannot be separated from a reused PID, and the controlled quiet-window release measurement is still pending.
 3. The inbox cap is enforced by `enqueue` before a file is created (`R3b`), but writers that bypass `enqueue` are not counted; reconcile still surfaces such a queue as storage overflow.
-4. The installed helper path points into this repository. A live install from a non-default bundle path worked, but moving the app bundle breaks the installed extension until reinstall.
+4. The installed helper path is baked at install time. The integrations card now compares the installed copy with a render at the receipt's generation and shows «требуется обновить» when the app moved or the bundled asset changed; «Обновить» reuses the preview/apply path with a new generation. Removal still works without a helper or when the app moved. This is detection and confirmed repair, not automatic repair: an OMP session already running across a move can still hold its working record until the process exits.
 5. Menu-bar pause/quit was not clicked in the live test; the underlying `PowerPolicy` pause and release paths are tested, and process exit releases the assertion.
 6. CPU use, wakeups, and the two-second processing target are not measured (A17).
 7. A live owner can keep an orphaned `working` record after a missed terminal or supersede event (observed 2026-11-09: a stale generation held the assertion for over 40 minutes with no OMP turn running). The R3c fix is implemented, unit-tested, and live-verified on 2026-11-09 (the first startup pass after a rebuilt-bundle relaunch ended five stale generations and kept only the newest active one), but the installed extension still updates only on a future reinstall and the rule's residual limitations above still apply. Pause remains an immediate manual control; a generation bump/reinstall or owner exit also clears an orphan. The old 2026-11-08 `eventRejected` gap is not cleared by this fix.

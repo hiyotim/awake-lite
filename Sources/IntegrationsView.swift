@@ -44,6 +44,9 @@ final class IntegrationsStore: ObservableObject {
         var receipt: InstallReceipt?
         var receiptError: String?
         var recoveryRequired: Bool
+        /// Read-only comparison with this bundle; separate from a receipt read
+        /// error and from an unfinished operation.
+        var drift: PackageDrift = .notInstalled
         var busy: Bool
         var message: String?
         var errorText: String?
@@ -97,15 +100,21 @@ final class IntegrationsStore: ObservableObject {
     /// Why this bundle cannot name a helper for new installed hooks. Existing
     /// support stays removable, so this refuses installs only.
     private var helperPathError: String?
+    /// Helper path resolved from the running bundle; drift is computed against
+    /// this value so a moved bundle surfaces as a repair instead of silence.
+    private var resolvedHelperPath: String?
     private var discovery: ProductDiscovery
     private var manifests: [PackageManifest] = []
     private var targetStatuses: [String: [TargetStatus]] = [:]
     private var receipts: [String: InstallReceipt] = [:]
     private var receiptErrors: [String: String] = [:]
+    private var drifts: [String: PackageDrift] = [:]
     private var recoveryFamilies: Set<String> = []
     private var busyFamilies: Set<String> = []
     private var messages: [String: String] = [:]
     private var errors: [String: String] = [:]
+    private var pendingSetupFamily: String?
+    private var started = false
 
     init(
         resourceRoot: URL? = Bundle.main.resourceURL,
@@ -116,20 +125,48 @@ final class IntegrationsStore: ObservableObject {
         self.homeRoot = homeRoot
         self.appSupportRoot = appSupportRoot
         self.discovery = ProductDiscovery(homeRoot: homeRoot)
-        Task { self.start() }
+        Task { self.startIfNeeded() }
     }
 
     // MARK: Загрузка
 
+    /// Asks for the setup preview of one family as soon as the catalog is
+    /// ready. Called from the menu entry; it only opens a preview and never
+    /// applies anything.
+    func requestSetup(family: String) {
+        pendingSetupFamily = family
+        startIfNeeded()
+    }
+
     /// Каталог читается один раз; восстановление выполняется один раз на
     /// магазин, как требует контракт установщика.
-    private func start() {
-        guard catalogState == .loading else { return }
+    private func startIfNeeded() {
+        guard !started else {
+            presentPendingSetup()
+            return
+        }
+        started = true
         loadCatalog()
         performRecovery()
         refreshReceipts()
+        refreshDrift()
         rebuildCards()
         NotificationCenter.default.post(name: .awakeLiteActivationChanged, object: nil)
+        presentPendingSetup()
+    }
+
+    /// Opens the install preview for a menu-requested family only when it is
+    /// not installed yet. An installed package keeps its own repair action in
+    /// the card, so a setup click never silently reinstalls or bumps a
+    /// generation.
+    private func presentPendingSetup() {
+        guard let family = pendingSetupFamily,
+              catalogState == .ready,
+              sheet == nil,
+              receipts[family] == nil,
+              receiptErrors[family] == nil else { return }
+        pendingSetupFamily = nil
+        beginInstall(family: family)
     }
 
     private func loadCatalog() {
@@ -147,9 +184,11 @@ final class IntegrationsStore: ObservableObject {
             do {
                 let resolved = try HelperResolver.resolve(appBundle: Bundle.main.bundleURL)
                 helperPathError = nil
+                resolvedHelperPath = resolved
                 self.installer = Installer(catalog: catalog, helperPath: resolved)
             } catch {
                 helperPathError = Self.describe(error)
+                resolvedHelperPath = nil
                 self.installer = Installer(catalog: catalog)
             }
             self.manifests = catalog.allManifests
@@ -207,6 +246,94 @@ final class IntegrationsStore: ObservableObject {
         receiptErrors = failures
     }
 
+    /// Compares each installed receipt with the bytes this bundle would write
+    /// at the same activation generation. Read-only: it builds previews and
+    /// reads files, never writes and never bumps a generation.
+    private func refreshDrift() {
+        guard let catalog, let installer else {
+            drifts = [:]
+            return
+        }
+        var next: [String: PackageDrift] = [:]
+        for manifest in catalog.allManifests {
+            let family = manifest.family
+            guard receipts[family] != nil else {
+                next[family] = .notInstalled
+                continue
+            }
+            if let helperPathError {
+                next[family] = .blocked(helperPathError)
+                continue
+            }
+            do {
+                let preview = try installer.preview(
+                    family: family,
+                    configRoot: homeRoot,
+                    appSupportRoot: appSupportRoot,
+                    discovery: discovery
+                )
+                next[family] = try drift(
+                    manifest: manifest,
+                    preview: preview,
+                    receipt: receipts[family]
+                )
+            } catch {
+                next[family] = .blocked(Self.describe(error))
+            }
+        }
+        drifts = next
+    }
+
+    private func drift(
+        manifest: PackageManifest,
+        preview: InstallPreview,
+        receipt: InstallReceipt?
+    ) throws -> PackageDrift {
+        guard let generation = preview.previousGeneration else {
+            return .blocked("квитанция не называет поколение активации")
+        }
+        guard let helperPath = resolvedHelperPath else {
+            return .blocked(helperPathError ?? "путь помощника AwakeLite не определён")
+        }
+        // A fresh preview always renders the next generation, so its entry
+        // action cannot distinguish a moved bundle from that normal bump.
+        // Render the one app-owned copy at the receipt's generation instead.
+        let copies = preview.plan.steps.flatMap(\.entries).filter { planned in
+            switch planned.entry.kind {
+            case .pluginFile, .extensionFile, .commandWrapper:
+                return true
+            case .hookConfig:
+                return false
+            }
+        }
+        var comparison: (installed: Data?, expected: Data?)?
+        if let copy = copies.first {
+            let planner = InstallPlanner(
+                manifest: manifest,
+                receipt: receipt,
+                helperPath: helperPath
+            )
+            let expected = try planner.renderedCopyAsset(
+                assetID: copy.assetID,
+                marker: copy.marker,
+                target: copy.entry.target,
+                generation: generation
+            )
+            let installed = try ConfigEditor.readIfPresent(
+                URL(fileURLWithPath: copy.path, isDirectory: false)
+            )
+            comparison = (installed: installed, expected: expected)
+        }
+        return InstallDrift.evaluate(
+            InstallDriftInput(
+                hasReceipt: true,
+                helperPath: helperPath,
+                preview: preview,
+                copy: comparison
+            )
+        )
+    }
+
     private func rebuildCards() {
         cards = manifests.map { manifest in
             Card(
@@ -220,6 +347,7 @@ final class IntegrationsStore: ObservableObject {
                 receipt: receipts[manifest.family],
                 receiptError: receiptErrors[manifest.family],
                 recoveryRequired: recoveryFamilies.contains(manifest.family),
+                drift: drifts[manifest.family] ?? .notInstalled,
                 busy: busyFamilies.contains(manifest.family),
                 message: messages[manifest.family],
                 errorText: errors[manifest.family]
@@ -346,9 +474,10 @@ final class IntegrationsStore: ObservableObject {
         Task { self.performRemoval(family) }
     }
 
-    /// Честный отчёт: адаптеры этапа 3 и помощник поставлены, и установленная связка может
-    /// писать события, но приложение не подписано на inbox и не управляет моделью, поэтому
-    /// наблюдаемого состояния работы нет и подключение подтвердить нельзя.
+    /// Честный отчёт: установленная связка пишет события, а приложение
+    /// загружает активацию, следит за inbox и управляет моделью; реальную
+    /// доставку OMP подтверждает только живая задача, поэтому кнопка не
+    /// выдаёт статус за проверенный.
     func checkConnection(family: String) {
         guard !busyFamilies.contains(family) else { return }
         errors[family] = nil
@@ -383,6 +512,7 @@ final class IntegrationsStore: ObservableObject {
         defer {
             busyFamilies.remove(family)
             refreshReceipts()
+            refreshDrift()
             rebuildCards()
             NotificationCenter.default.post(name: .awakeLiteActivationChanged, object: nil)
         }
@@ -407,6 +537,7 @@ final class IntegrationsStore: ObservableObject {
         defer {
             busyFamilies.remove(family)
             refreshReceipts()
+            refreshDrift()
             rebuildCards()
             NotificationCenter.default.post(name: .awakeLiteActivationChanged, object: nil)
         }
@@ -473,11 +604,20 @@ final class IntegrationsWindowController {
     private static let frameAutosaveName = "AwakeLiteIntegrationsWindow"
 
     private var window: NSWindow?
+    /// One store per window controller, so a menu request can reach an already
+    /// open window instead of being lost with a freshly created view.
+    private let store = IntegrationsStore()
 
     private init() {}
 
     /// Показывает окно каталога, создавая его при первом обращении.
-    func show() {
+    ///
+    /// `setupFamily` only opens the install preview for a family that is not
+    /// installed yet; it never applies anything and never bumps a generation.
+    func show(setupFamily: String? = nil) {
+        if let setupFamily {
+            store.requestSetup(family: setupFamily)
+        }
         let window = window ?? makeWindow()
         self.window = window
         NSApp.activate(ignoringOtherApps: true)
@@ -486,7 +626,7 @@ final class IntegrationsWindowController {
 
     private func makeWindow() -> NSWindow {
         let window = NSWindow(
-            contentViewController: NSHostingController(rootView: IntegrationsView())
+            contentViewController: NSHostingController(rootView: IntegrationsView(store: store))
         )
         window.title = "Интеграции"
         window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
@@ -501,7 +641,7 @@ final class IntegrationsWindowController {
 }
 
 struct IntegrationsView: View {
-    @StateObject private var store = IntegrationsStore()
+    @ObservedObject var store: IntegrationsStore
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -586,8 +726,25 @@ private struct IntegrationCardView: View {
         return card.receipt == nil ? .secondary : .green
     }
 
+    private var driftMessage: String? {
+        switch card.drift {
+        case .needsUpdate:
+            return "Приложение перемещено или расширение устарело — требуется обновить поддержку \(card.displayName)."
+        case .blocked(let reason):
+            // An unfinished operation or unreadable receipt already has its own
+            // notice above; repeating its conflict here adds noise.
+            guard !card.recoveryRequired, card.receiptError == nil else { return nil }
+            return "Проверка обновления недоступна: \(reason)"
+        case .current, .notInstalled:
+            return nil
+        }
+    }
+
     private var requiredActions: [String] {
         var actions: [String] = []
+        if card.drift == .needsUpdate {
+            actions.append("Нажать «Обновить»: установленная запись укажет на помощника текущего бандла.")
+        }
         if card.receipt == nil {
             if card.receiptError != nil {
                 actions.append("Устранить ошибку чтения квитанции и проверить статус заново.")
@@ -648,6 +805,14 @@ private struct IntegrationCardView: View {
                 Text("Квитанция установки не читается: \(receiptError)")
                     .font(.callout)
                     .foregroundStyle(.red)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if let message = driftMessage {
+                Text(message)
+                    .font(.callout.bold())
+                    .foregroundStyle(card.drift == .needsUpdate ? Color.orange : Color.red)
                     .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -730,6 +895,9 @@ private struct IntegrationCardView: View {
 
     private var actions: some View {
         HStack(spacing: 8) {
+            if card.drift == .needsUpdate {
+                Button("Обновить") { store.beginInstall(family: card.family) }
+            }
             Button("Установить поддержку") { store.beginInstall(family: card.family) }
             Button("Удалить поддержку") { store.beginRemoval(family: card.family) }
                 .disabled(card.receipt == nil || card.receiptError != nil)

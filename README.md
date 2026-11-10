@@ -6,7 +6,7 @@ AwakeLite is a native macOS menu-bar utility intended to prevent automatic syste
 
 The app is wired: `AppCoordinator` recovers pending install operations, loads the model checkpoint, applies committed activation, watches the inbox, reconciles events, and feeds the aggregate decision into `AwakeController` and the single IOKit assertion. An app restart re-acquires persisted working state; disabled or unreadable OMP activation starts no observer.
 
-A real OMP `18.16.0` print-mode session has now exercised the whole path: work start held a real assertion, completion released it, and an idle session held nothing. Retry, background jobs, parallel sessions, approval denial, owner death, and full acceptance remain unverified. The test extension is installed at `~/.omp/agent/extensions/awake-lite/index.js` at activation generation 2 and points at this repository's `AwakeLite.app`; moving the repository breaks that installed path until reinstall.
+A real OMP `18.16.0` print-mode session has now exercised the whole path: work start held a real assertion, completion released it, and an idle session held nothing. Retry, background jobs, parallel sessions, approval denial, owner death, and full acceptance remain unverified. The installed test extension at `~/.omp/agent/extensions/awake-lite/index.js` was written at activation generation 2 by an earlier bundle; the integrations card now compares it with the current bundle and shows «требуется обновить» instead of failing silently when the app has moved.
 
 OMP is the only shipped integration family and `omp.cli` the only shipped target. Pi, Codex, OpenCode, Claude Code, Cursor, and Antigravity adapters and resources were removed from the shipped surface on 2026-11-04. Their manifests survive only as test-only installer fixtures; no adapter, catalog entry, or app code loads them. The checkpoint branch `omp-only-minimal` preserves the pre-cut work.
 
@@ -40,7 +40,25 @@ codesign --verify --strict AwakeLite.app
 
 `build.sh` recreates the local generated `AwakeLite.app`, builds the helper into `Contents/MacOS/AwakeLiteHelper`, copies the OMP integration package, and signs the helper before the app. A successful build does not establish OMP event delivery or correct sleep behavior. Documentation-only changes require no build or app launch.
 
-For an authorized runtime check, launch the local bundle with `open AwakeLite.app`. Building and launching do not install it into `/Applications` or configure OMP. Prepare OMP setup separately through the existing preview and receipt path. The catalog store resolves the helper from the current app bundle and refuses setup when resolution fails; path escaping still needs verification for the chosen location.
+## Install and OMP setup
+
+Build first, then move the bundle to a stable location before enabling support:
+
+```sh
+./build.sh
+cp -R AwakeLite.app /Applications/AwakeLite.app
+open /Applications/AwakeLite.app
+```
+
+The installed OMP extension stores the absolute helper path at install time. Keeping the app in a temporary build directory and moving it later leaves the extension pointing at a path that no longer exists; spawning the helper then fails silently because the extension ignores exit codes. Install from the final location. `build.sh` produces an ad-hoc-signed, single-architecture development build; it is not notarized or prepared for public distribution.
+
+1. Open the menu-bar item and choose «Настроить OMP…». With no OMP receipt, this opens the install preview for `omp`.
+2. Review the exact paths, preview entries, and conflicts, then press «Применить». Nothing is written before that confirmation and the helper path shown is the one from the running bundle.
+3. Restart OMP so it loads the extension.
+4. If the app is moved later, open «Интеграции…» (or «Настроить OMP…»). The card compares the installed file with what the current bundle would write and shows «Приложение перемещено или расширение устарело — требуется обновить поддержку OMP». Press «Обновить», review the preview, and apply; that rewrites the helper path and installs the current bundled extension with a new activation generation.
+5. Removal always works from the receipt, even when the current bundle cannot resolve a helper or the installed file was edited by hand. A hand-edited owned file is reported as a conflict instead of being overwritten.
+
+The comparison is read-only on window load: it never reinstalls, never bumps a generation, and never edits files. Only the existing preview/apply action changes state. A moved bundle with an OMP session already running can still leave a working record holding the assertion until OMP exits; repairing support does not retroactively close a record owned by a live process.
 
 ## Evidence and limits
 

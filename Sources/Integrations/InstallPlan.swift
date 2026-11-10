@@ -783,6 +783,28 @@ struct InstallPlanner {
         )
     }
 
+    /// Bytes this planner would write for one copy asset at a specific
+    /// generation.
+    ///
+    /// `plan` renders at the next activation generation, so a fresh render
+    /// never equals an installed file. Drift detection renders at the
+    /// receipt's generation instead; only a moved helper path or a changed
+    /// asset differs then.
+    func renderedCopyAsset(
+        assetID: String,
+        marker: String,
+        target: String,
+        generation: UInt64
+    ) throws -> Data {
+        let text = try renderedTextAsset(
+            assetID,
+            marker: marker,
+            target: target,
+            generation: generation
+        )
+        return Data(text.utf8)
+    }
+
     private func renderedJSONAsset(
         _ id: String,
         marker: String,
