@@ -535,6 +535,77 @@ final class OMPAdapterTests: XCTestCase {
         XCTAssertNil(result.event)
     }
 
+    func testOmpSubagentTurnStartKeepsParentIdentity() throws {
+        try HelperFixtures.activate(family: "omp", root: support)
+
+        let childRun = try emitEvent(
+            family: "omp", target: "omp.cli", event: "agent_start",
+            payload: ompPayload(overrides: [
+                "session": "omp-child",
+                "workGeneration": 3,
+                "agentKind": "sub",
+                "parentWork": "Main_agent"
+            ], removing: ["sequence", "willContinue", "awaitingAsyncWork", "success"]),
+            adapters: ompAdapters
+        )
+        let childTurn = try emitEvent(
+            family: "omp", target: "omp.cli", event: "turn_start",
+            payload: ompPayload(overrides: [
+                "session": "omp-child",
+                "workGeneration": 3,
+                "agentKind": "sub",
+                "parentWork": "Main_agent",
+                "sequence": 1
+            ], removing: ["willContinue", "awaitingAsyncWork", "success"]),
+            adapters: ompAdapters, at: 1
+        )
+
+        XCTAssertEqual(childTurn.transition, .childStarted)
+        XCTAssertEqual(childTurn.parentWork, "Main_agent", "a later child event keeps its parent")
+        XCTAssertEqual(childTurn.generation, 3)
+        XCTAssertEqual(childTurn.sequence, 1)
+
+        var model = activatedModel("omp")
+        XCTAssertEqual(model.apply(childRun), .applied)
+        XCTAssertEqual(model.apply(childTurn), .applied)
+        XCTAssertEqual(model.works.count, 1, "the turn updates the child's own record")
+        XCTAssertEqual(
+            runRecord(model, family: "omp", session: "omp-child", generation: 3)?.parentWork,
+            "Main_agent",
+            "no parentless record appears in the child session when turn_start is applied"
+        )
+    }
+
+    func testOmpSubagentTurnStartWithoutParentIsRejected() throws {
+        try HelperFixtures.activate(family: "omp", root: support)
+
+        let result = try emit(
+            family: "omp", target: "omp.cli", event: "turn_start",
+            payload: ompPayload(overrides: ["agentKind": "sub"]),
+            adapters: ompAdapters
+        )
+
+        XCTAssertEqual(result.code, 2)
+        XCTAssertEqual(result.lines.count, 1)
+        XCTAssertTrue(result.lines[0].contains("\"parentWork\""), result.lines[0])
+        XCTAssertNil(result.event, "a parentless child turn is refused, not stored")
+    }
+
+    func testOmpMainTurnStartStaysStarted() throws {
+        try HelperFixtures.activate(family: "omp", root: support)
+
+        let turn = try emitEvent(
+            family: "omp", target: "omp.cli", event: "turn_start",
+            payload: ompPayload(overrides: ["sequence": 1],
+                                removing: ["willContinue", "awaitingAsyncWork", "success"]),
+            adapters: ompAdapters
+        )
+
+        XCTAssertEqual(turn.transition, .started)
+        XCTAssertNil(turn.parentWork)
+        XCTAssertEqual(turn.generation, 7)
+    }
+
     // MARK: - Rejection and privacy
 
     func testOmpMissingDocumentedFieldNamesOnlyTheField() throws {

@@ -55,6 +55,13 @@ import Foundation
 /// | `willContinue`, `awaitingAsyncWork` | documented `agent_end` fields |
 /// | `success` | documented `auto_retry_end.success` |
 ///
+/// `turn_start` follows the same main/sub split as `agent_start`: a child turn
+/// must carry its parent and maps to `childStarted`, while a main turn maps to
+/// `started`. The extension captures the child parent once at `agent_start`,
+/// because one helper emission per event gives no ordering guarantee and a
+/// later `ctx` may omit `parentId`; a parentless child turn is refused instead
+/// of creating a second, unattached record in the child session.
+///
 /// `workGeneration` is optional on `session_shutdown`: the asset includes it
 /// only when a run is active, so teardown cancels that run instead of guessing
 /// a run identity or retiring another session's work.
@@ -200,6 +207,26 @@ struct OMPAdapter: HookAdapter {
             )
 
         case "turn_start":
+            // A child's later turn events must carry the same parent as its
+            // `agent_start`. Event order between detached helpers is not
+            // guaranteed, so a `turn_start` can be applied before
+            // `childStarted`; a main-style `.started` here would create a
+            // parentless work record in the child session that no later event
+            // repairs. The kind and parent are required, exactly as for
+            // `agent_start`.
+            let kind = try Self.requiredKind(payload)
+            if kind == "sub" {
+                let parent = try Self.requiredParent(payload)
+                return try Self.run(
+                    invocation,
+                    payload: payload,
+                    owner: owner,
+                    now: now,
+                    session: session,
+                    transition: .childStarted,
+                    parentWork: parent
+                )
+            }
             return try Self.run(
                 invocation,
                 payload: payload,
