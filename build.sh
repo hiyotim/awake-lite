@@ -28,6 +28,8 @@ swiftc -O \
 cp Resources/Info.plist "$app/Contents/Info.plist"
 # Bundled, trusted integration manifests and inert templates stay with the app.
 cp -R Resources/Integrations/. "$app/Contents/Resources/Integrations/"
+# App icon referenced by CFBundleIconFile.
+cp Resources/AppIcon.icns "$app/Contents/Resources/AppIcon.icns"
 
 # Nested code is signed before the bundle that seals it.
 codesign --force --sign - "$helper" >/dev/null
